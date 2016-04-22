@@ -5,6 +5,7 @@ import vscode.BasicTypes;
 import vscode.ProtocolTypes;
 import jsonrpc.Protocol;
 import jsonrpc.ErrorCodes.internalError;
+import HaxeDisplayTypes;
 
 class GotoDefinitionFeature extends Feature {
     override function init() {
@@ -20,16 +21,11 @@ class GotoDefinitionFeature extends Feature {
             if (token.canceled)
                 return;
 
-            var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
-
-            var positions = [for (el in xml.elements()) el.firstChild().nodeValue];
-            if (positions.length == 0)
-                return resolve([]);
+            var data:Array<Pos> = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
 
             var results = [];
-            for (pos in positions) {
-                var location = HaxePosition.parse(pos, doc, null); // no cache because this right now only returns one position
+            for (pos in data) {
+                var location = HaxePosition.parseJson(pos, doc, null); // no cache because this right now only returns one position
                 if (location == null) {
                     trace("Got invalid position: " + pos);
                     continue;

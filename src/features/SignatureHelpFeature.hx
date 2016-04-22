@@ -7,8 +7,7 @@ import vscode.ProtocolTypes;
 import jsonrpc.Protocol;
 import jsonrpc.ErrorCodes.internalError;
 
-import Uri.uriToFsPath;
-import SignatureHelper.*;
+import HaxeDisplayTypes;
 
 class SignatureHelpFeature extends Feature {
     override function init() {
@@ -30,25 +29,14 @@ class SignatureHelpFeature extends Feature {
             if (token.canceled)
                 return;
 
-            data = '<x>$data</x>';
-            var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
+            var data:Array<TypeInfo> = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
 
             var signatures = new Array<SignatureInformation>();
-            for (el in xml.elements()) {
-                var text = el.firstChild().nodeValue.trim();
-                var signature:SignatureInformation;
-                switch (parseDisplayType(text)) {
-                    case DTFunction(args, ret):
-                        signature = {
-                            label: printFunctionSignature(args, ret),
-                            parameters: [for (arg in args) {label: printFunctionArgument(arg)}],
-
-                        }
-                    default:
-                        signature = {label: text}; // this should not happen
-                }
-                signatures.push(signature);
+            for (type in data) {
+                signatures.push({
+                    label: TypePrinter.printFunctionSignature(type.args, type.ret),
+                    parameters: [for (i in 0...type.args.length) {label: TypePrinter.printFunctionArgument(type.args[i], i)}],
+                });
             }
 
             resolve({

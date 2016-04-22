@@ -5,8 +5,7 @@ import vscode.ProtocolTypes;
 import jsonrpc.Protocol;
 import jsonrpc.ErrorCodes.internalError;
 
-import Uri.uriToFsPath;
-import SignatureHelper.*;
+import HaxeDisplayTypes;
 
 class HoverFeature extends Feature {
     override function init() {
@@ -22,21 +21,19 @@ class HoverFeature extends Feature {
             if (token.canceled)
                 return;
 
-            var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
+            var data:{range:Range, type:TypeInfo} = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
 
-            var s = StringTools.trim(xml.firstChild().nodeValue);
-            var type = switch (parseDisplayType(s)) {
-                case DTFunction(args, ret):
-                    "function" + printFunctionSignature(args, ret);
-                case DTValue(type):
-                    if (type == null) "unknown" else type;
-            };
-
-            var result:Hover = {contents: {language: "haxe", value: type}};
-            var p = HaxePosition.parse(xml.get("p"), doc, null);
-            if (p != null)
-                result.range = p.range;
+            var result:Hover = {contents: TypePrinter.printType(data.type)};
+            if (data.range != null) {
+                inline function bytePosToCharPos(p) {
+                    var line = doc.lineAt(p.line);
+                    return {line: p.line, character: HaxePosition.byteOffsetToCharacterOffset(line, p.character)};
+                }
+                result.range = {
+                    start: bytePosToCharPos(data.range.start),
+                    end: bytePosToCharPos(data.range.end),
+                };
+            }
 
             resolve(result);
         });

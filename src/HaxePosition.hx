@@ -5,6 +5,9 @@ class HaxePosition {
     static var properFileNameCaseCache:Map<String,String>;
     static var isWindows = (Sys.systemName() == "Windows");
 
+    // TODO: extract range handling since sometimes we just need a range in the stdin file and don't
+    // need the rest of the logic
+
     public static function parse(pos:String, doc:TextDocument, cache:Map<String,Array<String>>):Null<Location> {
         if (!positionRe.match(pos))
             return null;
@@ -64,6 +67,43 @@ class HaxePosition {
                 }
             };
         }
+    }
+
+    public static function parseJson(pos:HaxeDisplayTypes.Pos, doc:TextDocument, cache:Map<String,Array<String>>):Null<Location> {
+        if (pos == null)
+            return null;
+
+        var file = getProperFileNameCase(pos.file);
+        var uri, getLine;
+        if (file == doc.fsPath) {
+            uri = doc.uri;
+            getLine = doc.lineAt;
+        } else {
+            uri = Uri.fsPathToUri(file);
+            var lines;
+            if (cache == null) {
+                lines = sys.io.File.getContent(file).split("\n");
+            } else {
+                lines = cache[file];
+                if (lines == null)
+                    lines = cache[file] = sys.io.File.getContent(file).split("\n");
+            }
+            getLine = function(n) return lines[n];
+        }
+
+        var line = getLine(pos.start.line);
+        var startChar = byteOffsetToCharacterOffset(line, pos.start.character);
+        if (pos.end.line != pos.start.line)
+            line = getLine(pos.end.line);
+        var endChar = byteOffsetToCharacterOffset(line, pos.end.character);
+
+        return {
+            uri: uri,
+            range: {
+                start: {line: pos.start.line, character: startChar},
+                end: {line: pos.end.line, character: endChar},
+            }
+        };
     }
 
     public static inline function byteOffsetToCharacterOffset(string:String, byteOffset:Int):Int {

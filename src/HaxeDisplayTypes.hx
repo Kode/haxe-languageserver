@@ -56,6 +56,8 @@ typedef FieldOrArg = {
 
 
 class TypePrinter {
+
+    // TODO: print Null<T> differently?
     public static function printType(type:TypeInfo):String {
         return switch (type.kind) {
             case TKClass | TKClassStatics:
@@ -101,7 +103,7 @@ class TypePrinter {
     static function printTypeInner(type:TypeInfo, inArrowFunction = false):String {
         return switch (type.kind) {
             case TKClass | TKClassStatics | TKInterface | TKEnum | TKEnumStatics | TKTypedef | TKAbstract | TKAbstractStatics:
-                printTypePath(type) + printTypeParams(type.params);
+                printTypePath(type);
             case TKFunction:
                 var r = printFunctionArrow(type.args, type.ret);
                 if (inArrowFunction) '($r)' else r;

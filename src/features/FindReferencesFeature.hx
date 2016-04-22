@@ -4,6 +4,7 @@ import vscode.BasicTypes;
 import vscode.ProtocolTypes;
 import jsonrpc.Protocol;
 import jsonrpc.ErrorCodes.internalError;
+import HaxeDisplayTypes;
 
 class FindReferencesFeature extends Feature {
     override function init() {
@@ -19,17 +20,12 @@ class FindReferencesFeature extends Feature {
             if (token.canceled)
                 return;
 
-            var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
-
-            var positions = [for (el in xml.elements()) el.firstChild().nodeValue];
-            if (positions.length == 0)
-                return resolve([]);
+            var data:Array<Pos> = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
 
             var results = [];
             var haxePosCache = new Map();
-            for (pos in positions) {
-                var location = HaxePosition.parse(pos, doc, haxePosCache);
+            for (pos in data) {
+                var location = HaxePosition.parseJson(pos, doc, haxePosCache);
                 if (location == null) {
                     trace("Got invalid position: " + pos);
                     continue;
