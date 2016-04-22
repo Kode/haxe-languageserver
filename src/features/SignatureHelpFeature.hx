@@ -9,6 +9,12 @@ import jsonrpc.ErrorCodes.internalError;
 
 import HaxeDisplayTypes;
 
+private typedef Signature = {
+    args:Array<FieldOrArg>,
+    ret:TypeInfo,
+    ?doc:String,
+}
+
 class SignatureHelpFeature extends Feature {
     override function init() {
         context.protocol.onSignatureHelp = onSignatureHelp;
@@ -29,14 +35,17 @@ class SignatureHelpFeature extends Feature {
             if (token.canceled)
                 return;
 
-            var data:Array<TypeInfo> = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
+            var data:Array<Signature> = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
 
             var signatures = new Array<SignatureInformation>();
-            for (type in data) {
-                signatures.push({
-                    label: TypePrinter.printFunctionSignature(type.args, type.ret),
-                    parameters: [for (i in 0...type.args.length) {label: TypePrinter.printFunctionArgument(type.args[i], i)}],
-                });
+            for (entry in data) {
+                var sig:SignatureInformation = {
+                    label: TypePrinter.printFunctionSignature(entry.args, entry.ret),
+                    parameters: [for (i in 0...entry.args.length) {label: TypePrinter.printFunctionArgument(entry.args[i], i)}],
+                };
+                if (entry.doc != null)
+                    sig.documentation = entry.doc;
+                signatures.push(sig);
             }
 
             resolve({
