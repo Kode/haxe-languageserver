@@ -61,15 +61,15 @@ class TypePrinter {
     public static function printType(type:TypeInfo):String {
         return switch (type.kind) {
             case TKClass | TKClassStatics:
-                "(class) " + printTypePath(type);
+                "(class) " + printTypePath(type.path) + printTypeParams(type.params);
             case TKInterface:
-                "(interface) " + printTypePath(type);
+                "(interface) " + printTypePath(type.path) + printTypeParams(type.params);
             case TKEnum | TKEnumStatics:
-                "(enum) " + printTypePath(type);
+                "(enum) " + printTypePath(type.path) + printTypeParams(type.params);
             case TKTypedef:
-                "(typedef) " + printTypePath(type);
+                "(typedef) " + printTypePath(type.path) + printTypeParams(type.params);
             case TKAbstract | TKAbstractStatics:
-                "(abstract) " + printTypePath(type);
+                "(abstract) " + printTypePath(type.path) + printTypeParams(type.params);
             case TKFunction:
                  printFunctionSignature(type.args, type.ret);
             case TKAnon:
@@ -83,12 +83,11 @@ class TypePrinter {
         }
     }
 
-    static function printTypePath(type:TypeInfo):String {
-        var path = type.path.name;
-        if (type.path.pack != null)
-            path = type.path.pack.join(".") + "." + path;
-        path += printTypeParams(type.params);
-        return path;
+    public static function printTypePath(path:TypePath):String {
+        var r = path.name;
+        if (path.pack != null)
+            r = path.pack.join(".") + "." + r;
+        return r;
     }
 
     static function printTypeParams(params:Array<TypeInfo>):String {
@@ -100,10 +99,10 @@ class TypePrinter {
         return '<${result.join(",")}>';
     }
 
-    static function printTypeInner(type:TypeInfo, inArrowFunction = false):String {
+    public static function printTypeInner(type:TypeInfo, inArrowFunction = false):String {
         return switch (type.kind) {
             case TKClass | TKClassStatics | TKInterface | TKEnum | TKEnumStatics | TKTypedef | TKAbstract | TKAbstractStatics:
-                printTypePath(type);
+                printTypePath(type.path) + printTypeParams(type.params);
             case TKFunction:
                 var r = printFunctionArrow(type.args, type.ret);
                 if (inArrowFunction) '($r)' else r;
@@ -195,4 +194,23 @@ class TypePrinter {
             return type.params[0];
         return type;
     }
+}
+
+
+@:enum abstract ToplevelCompletionItemKind(String) {
+    var Local = "local";
+    var Member = "member";
+    var Static = "static";
+    var Enum = "enum";
+    var Global = "global";
+    var Type = "type";
+    var Package = "pack";
+}
+
+typedef ToplevelCompletionItem = {
+    var kind:ToplevelCompletionItemKind;
+    @:optional var name:String;
+    @:optional var type:TypeInfo;
+    @:optional var parent:TypePath;
+    @:optional var path:TypePath;
 }

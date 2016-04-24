@@ -6,6 +6,7 @@ import jsonrpc.Protocol;
 import jsonrpc.ErrorCodes.internalError;
 
 import SignatureHelper.prepareSignature;
+import HaxeDisplayTypes;
 
 class CompletionFeature extends Feature {
     override function init() {
@@ -23,10 +24,16 @@ class CompletionFeature extends Feature {
             if (token.canceled)
                 return;
 
-            var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
+            var items =
+                if (r.toplevel) {
+                    var data:Array<ToplevelCompletionItem> = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
+                    parseToplevelCompletion(data);
+                } else {
+                    var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
+                    if (xml == null) return reject(internalError("Invalid xml data: " + data));
+                    parseFieldCompletion(xml);
+                };
 
-            var items = if (r.toplevel) parseToplevelCompletion(xml) else parseFieldCompletion(xml);
             resolve(items);
         });
     }
@@ -46,30 +53,51 @@ class CompletionFeature extends Feature {
             };
     }
 
-    static function parseToplevelCompletion(x:Xml):Array<CompletionItem> {
+    static function parseToplevelCompletion(completion:Array<ToplevelCompletionItem>):Array<CompletionItem> {
         var result = [];
-        for (el in x.elements()) {
-            var kind = el.get("k");
-            var type = el.get("t");
-            var name = el.firstChild().nodeValue;
+        for (el in completion) {
+            var kind:CompletionItemKind, name, fullName = null, type = null;
+            switch (el.kind) {
+                case Local:
+                    kind = Variable;
+                    name = el.name;
+                    type = el.type;
+                case Member | Static:
+                    kind = Field;
+                    name = el.name;
+                    type = el.type;
+                case Enum:
+                    kind = Enum;
+                    name = el.name;
+                    type = el.type;
+                case Global:
+                    kind = Variable;
+                    name = el.name;
+                    type = el.type;
+                    fullName = TypePrinter.printTypePath(el.parent) + "." + el.name;
+                case Type:
+                    kind = Class;
+                    name = el.path.name;
+                    fullName = TypePrinter.printTypePath(el.path);
+                case Package:
+                    kind = Module;
+                    name = el.name;
+            }
 
-            var item:CompletionItem = {label: name};
+            if (fullName == name)
+                fullName = null;
 
-            var displayKind = toplevelKindToCompletionItemKind(kind);
-            if (displayKind != null) item.kind = displayKind;
+            var item:CompletionItem = {
+                label: name,
+                kind: kind,
+            }
 
-            var fullName = name;
-            if (kind == "global")
-                fullName = el.get("p") + "." + name;
-            else if (kind == "type")
-                fullName = el.get("p");
-
-            if (type != null || fullName != name) {
+            if (type != null || fullName != null) {
                 var parts = [];
-                if (fullName != name)
+                if (fullName != null)
                     parts.push('($fullName)');
                 if (type != null)
-                    parts.push(type); // todo format functions?
+                    parts.push(TypePrinter.printTypeInner(type));
                 item.detail = parts.join(" ");
             }
 
@@ -77,20 +105,6 @@ class CompletionFeature extends Feature {
         }
         return result;
     }
-
-    static function toplevelKindToCompletionItemKind(kind:String):CompletionItemKind {
-        return switch (kind) {
-            case "local": Variable;
-            case "member": Field;
-            case "static": Class;
-            case "enum": Enum;
-            case "global": Variable;
-            case "type": Class;
-            case "package": Module;
-            default: trace("unknown toplevel item kind: " + kind); null;
-        }
-    }
-
 
     static function parseFieldCompletion(x:Xml):Array<CompletionItem> {
         var result = [];
