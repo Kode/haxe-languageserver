@@ -214,3 +214,18 @@ typedef ToplevelCompletionItem = {
     @:optional var parent:TypePath;
     @:optional var path:TypePath;
 }
+
+@:enum abstract FieldCompletionItemKind(String) {
+    var Var = "var";
+    var Method = "method";
+    var Type = "type";
+    var Package = "package";
+}
+
+typedef FieldCompletionItem = {
+    var kind:FieldCompletionItemKind;
+    var name:String;
+    @:optional var type:TypeInfo;
+    @:optional var path:String;
+    @:optional var doc:String;
+}

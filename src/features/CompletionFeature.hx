@@ -5,7 +5,6 @@ import vscode.ProtocolTypes;
 import jsonrpc.Protocol;
 import jsonrpc.ErrorCodes.internalError;
 
-import SignatureHelper.prepareSignature;
 import HaxeDisplayTypes;
 
 class CompletionFeature extends Feature {
@@ -24,17 +23,8 @@ class CompletionFeature extends Feature {
             if (token.canceled)
                 return;
 
-            var items =
-                if (r.toplevel) {
-                    var data:Array<ToplevelCompletionItem> = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
-                    parseToplevelCompletion(data);
-                } else {
-                    var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-                    if (xml == null) return reject(internalError("Invalid xml data: " + data));
-                    parseFieldCompletion(xml);
-                };
-
-            resolve(items);
+            var data:Dynamic = try haxe.Json.parse(data) catch (_:Dynamic) return reject(internalError("Invalid JSON data: " + data));
+            resolve(if (r.toplevel) parseToplevelCompletion(data) else parseFieldCompletion(data));
         });
     }
 
@@ -106,42 +96,23 @@ class CompletionFeature extends Feature {
         return result;
     }
 
-    static function parseFieldCompletion(x:Xml):Array<CompletionItem> {
+    static function parseFieldCompletion(completion:Array<FieldCompletionItem>):Array<CompletionItem> {
         var result = [];
-        for (el in x.elements()) {
-            var kind = fieldKindToCompletionItemKind(el.get("k"));
-            var type = null, doc = null;
-            for (child in el.elements()) {
-                switch (child.nodeName) {
-                    case "t": type = child.firstChild().nodeValue;
-                    case "d": doc = child.firstChild().nodeValue;
+        for (el in completion) {
+            var item:CompletionItem = {
+                label: el.name,
+                kind: switch (el.kind) {
+                    case Var: Field;
+                    case Method: Method;
+                    case Type: Class;
+                    case Package: Module;
                 }
-            }
-            var name = el.get("n");
-            var item:CompletionItem = {label: name};
-            if (doc != null) item.documentation = doc;
-            if (kind != null) item.kind = kind;
-            if (type != null) item.detail = formatType(type, name, kind);
+            };
+            if (el.doc != null) item.documentation = el.doc;
+            if (el.type != null) item.detail = TypePrinter.printTypeInner(el.type);
             result.push(item);
         }
         return result;
-    }
-
-    static function formatType(type:String, name:String, kind:CompletionItemKind):String {
-        return switch (kind) {
-            case Method: name + prepareSignature(type);
-            default: type;
-        }
-    }
-
-    static function fieldKindToCompletionItemKind(kind:String):CompletionItemKind {
-        return switch (kind) {
-            case "var": Field;
-            case "method": Method;
-            case "type": Class;
-            case "package": Module;
-            default: trace("unknown field item kind: " + kind); null;
-        }
     }
 }
 

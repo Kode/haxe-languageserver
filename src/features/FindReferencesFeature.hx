@@ -25,7 +25,7 @@ class FindReferencesFeature extends Feature {
             var results = [];
             var haxePosCache = new Map();
             for (pos in data) {
-                var location = HaxePosition.parseJson(pos, doc, haxePosCache);
+                var location = HaxePosition.parse(pos, doc, haxePosCache);
                 if (location == null) {
                     trace("Got invalid position: " + pos);
                     continue;

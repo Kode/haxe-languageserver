@@ -25,7 +25,7 @@ class GotoDefinitionFeature extends Feature {
 
             var results = [];
             for (pos in data) {
-                var location = HaxePosition.parseJson(pos, doc, null); // no cache because this right now only returns one position
+                var location = HaxePosition.parse(pos, doc, null); // no cache because this right now only returns one position
                 if (location == null) {
                     trace("Got invalid position: " + pos);
                     continue;
