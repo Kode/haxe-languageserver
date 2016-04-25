@@ -48,28 +48,28 @@ class CompletionFeature extends Feature {
         for (el in completion) {
             var kind:CompletionItemKind, name, fullName = null, type = null;
             switch (el.kind) {
-                case Local:
+                case TCLocal:
                     kind = Variable;
                     name = el.name;
                     type = el.type;
-                case Member | Static:
+                case TCMember | TCStatic:
                     kind = Field;
                     name = el.name;
                     type = el.type;
-                case Enum:
+                case TCEnum:
                     kind = Enum;
                     name = el.name;
                     type = el.type;
-                case Global:
+                case TCGlobal:
                     kind = Variable;
                     name = el.name;
                     type = el.type;
                     fullName = TypePrinter.printTypePath(el.parent) + "." + el.name;
-                case Type:
+                case TCType:
                     kind = Class;
                     name = el.path.name;
                     fullName = TypePrinter.printTypePath(el.path);
-                case Package:
+                case TCPackage:
                     kind = Module;
                     name = el.name;
             }
@@ -102,10 +102,10 @@ class CompletionFeature extends Feature {
             var item:CompletionItem = {
                 label: el.name,
                 kind: switch (el.kind) {
-                    case Var: Field;
-                    case Method: Method;
-                    case Type: Class;
-                    case Package: Module;
+                    case FCVar: Field;
+                    case FCMethod: Method;
+                    case FCType: Class;
+                    case FCPackage: Module;
                 }
             };
             if (el.doc != null) item.documentation = el.doc;
