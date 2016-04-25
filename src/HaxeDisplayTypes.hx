@@ -54,6 +54,38 @@ typedef FieldOrArg = {
     ?opt:Bool,
 }
 
+@:enum abstract ToplevelCompletionKind(Int) {
+    var TCLocal = 1;
+    var TCMember = 2;
+    var TCStatic = 3;
+    var TCEnum = 4;
+    var TCGlobal = 5;
+    var TCType = 6;
+    var TCPackage = 7;
+}
+
+typedef ToplevelCompletionItem = {
+    var kind:ToplevelCompletionKind;
+    @:optional var name:String;
+    @:optional var type:TypeInfo;
+    @:optional var parent:TypePath;
+    @:optional var path:TypePath;
+}
+
+@:enum abstract FieldCompletionKind(Int) {
+    var FCVar = 1;
+    var FCMethod = 2;
+    var FCType = 3;
+    var FCPackage = 4;
+}
+
+typedef FieldCompletionItem = {
+    var kind:FieldCompletionKind;
+    var name:String;
+    @:optional var type:TypeInfo;
+    @:optional var path:String;
+    @:optional var doc:String;
+}
 
 class TypePrinter {
 
@@ -194,38 +226,4 @@ class TypePrinter {
             return type.params[0];
         return type;
     }
-}
-
-
-@:enum abstract ToplevelCompletionKind(Int) {
-    var TCLocal = 1;
-    var TCMember = 2;
-    var TCStatic = 3;
-    var TCEnum = 4;
-    var TCGlobal = 5;
-    var TCType = 6;
-    var TCPackage = 7;
-}
-
-typedef ToplevelCompletionItem = {
-    var kind:ToplevelCompletionKind;
-    @:optional var name:String;
-    @:optional var type:TypeInfo;
-    @:optional var parent:TypePath;
-    @:optional var path:TypePath;
-}
-
-@:enum abstract FieldCompletionKind(Int) {
-    var FCVar = 1;
-    var FCMethod = 2;
-    var FCType = 3;
-    var FCPackage = 4;
-}
-
-typedef FieldCompletionItem = {
-    var kind:FieldCompletionKind;
-    var name:String;
-    @:optional var type:TypeInfo;
-    @:optional var path:String;
-    @:optional var doc:String;
 }
