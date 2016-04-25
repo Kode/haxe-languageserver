@@ -67,6 +67,7 @@ typedef FieldOrArg = {
 typedef ToplevelCompletionItem = {
     var kind:ToplevelCompletionKind;
     @:optional var name:String;
+    @:optional var doc:String;
     @:optional var type:TypeInfo;
     @:optional var parent:TypePath;
     @:optional var path:TypePath;

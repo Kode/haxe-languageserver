@@ -91,6 +91,9 @@ class CompletionFeature extends Feature {
                 item.detail = parts.join(" ");
             }
 
+            if (el.doc != null)
+                item.documentation = el.doc;
+
             result.push(item);
         }
         return result;
