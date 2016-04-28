@@ -1,4 +1,6 @@
 import jsonrpc.Protocol;
+import js.node.Fs;
+import js.node.Path;
 import vscode.ProtocolTypes;
 
 class Context {
@@ -24,7 +26,7 @@ class Context {
         workspacePath = params.rootPath;
 
         haxeServer = new HaxeServer();
-        haxeServer.start(HAXE_SERVER_PORT, token, function(error) {
+        haxeServer.start(findHaxe(workspacePath, params.initializationOptions.kha), HAXE_SERVER_PORT, token, function(error) {
             if (error != null)
                 return reject(jsonrpc.JsonRpc.error(0, error, {retry: false}));
 
@@ -77,6 +79,28 @@ class Context {
     function onDidSaveTextDocument(event:DidSaveTextDocumentParams) {
         documents.onDidSaveTextDocument(event);
         diagnostics.getDiagnostics(event.textDocument.uri);
+    }
+    
+    static function findHaxe(projectDir:String, kha:String):String {
+        var executableExtension = ".exe";
+        var localPath = Path.join(projectDir, "Kha", "Tools", "Haxe");
+        try {
+            if (Fs.statSync(localPath).isDirectory()) {
+                return Path.join(localPath, "haxe" + executableExtension);
+            }
+        }
+        catch (error: Dynamic) {
+            var globalPath = Path.join(kha, "Tools", "Haxe");
+            try {
+                if (Fs.statSync(globalPath).isDirectory()) {
+                    return Path.join(globalPath, "haxe" + executableExtension);
+                }
+            }
+            catch (error: Dynamic) {
+            
+            }
+        }
+        return "";
     }
 }
 

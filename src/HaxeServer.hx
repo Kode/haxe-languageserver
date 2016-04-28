@@ -16,10 +16,10 @@ class HaxeServer {
     public function new() {
     }
 
-    public function start(port:Int, token:RequestToken, callback:String->Void) {
+    public function start(haxePath:String, port:Int, token:RequestToken, callback:String->Void) {
         this.port = port;
         stop();
-        proc = ChildProcess.spawn("haxe", ["--wait", "" + port], {stdio: Ignore});
+        proc = ChildProcess.spawn(haxePath, ["--wait", "" + port], {stdio: Ignore});
         process(["-version"], token, null, function(data) {
             if (!reVersion.match(data))
                 return callback("Error parsing haxe version " + data);
