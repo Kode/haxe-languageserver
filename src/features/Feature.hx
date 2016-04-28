@@ -13,7 +13,7 @@ class Feature {
     function init() {}
 
     function callDisplay(args:Array<String>, stdin:String, token:RequestToken, callback:String->Void) {
-        var actualArgs = ["--cwd", context.workspacePath]; // change cwd to workspace root
+        var actualArgs = ["--cwd", context.workspacePath + "/build"]; // change cwd to build root
         actualArgs = actualArgs.concat(context.displayArguments); // add arguments from the workspace settings
         actualArgs = actualArgs.concat([
             "-D", "display-details", // get more details in completion results,
