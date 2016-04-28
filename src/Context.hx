@@ -82,21 +82,35 @@ class Context {
     }
     
     static function findHaxe(projectDir:String, kha:String):String {
-        var executableExtension = ".exe";
+        var executableExtension:String;
+        if (js.Node.process.platform == "win32") {
+            executableExtension = ".exe";
+        } else if (js.Node.process.platform == "linux") {
+            if (js.Node.process.arch == "x64") {
+                executableExtension = "-linux64";
+            } else if (js.Node.process.arch == "arm") {
+                executableExtension = "-linuxarm";
+            } else {
+                executableExtension = "-linux32";
+            }
+        } else {
+            executableExtension = "-osx";
+        }
+        
         var localPath = Path.join(projectDir, "Kha", "Tools", "Haxe");
         try {
             if (Fs.statSync(localPath).isDirectory()) {
                 return Path.join(localPath, "haxe" + executableExtension);
             }
         }
-        catch (error: Dynamic) {
+        catch (error:Dynamic) {
             var globalPath = Path.join(kha, "Tools", "Haxe");
             try {
                 if (Fs.statSync(globalPath).isDirectory()) {
                     return Path.join(globalPath, "haxe" + executableExtension);
                 }
             }
-            catch (error: Dynamic) {
+            catch (error:Dynamic) {
             
             }
         }
