@@ -97,14 +97,14 @@ class Context {
             executableExtension = "-osx";
         }
         
-        var localPath = Path.join(projectDir, "Kha", "Tools", "Haxe");
+        var localPath = Path.join(projectDir, "Kha", "Tools", "haxe");
         try {
             if (Fs.statSync(localPath).isDirectory()) {
                 return Path.join(localPath, "haxe" + executableExtension);
             }
         }
         catch (error:Dynamic) {
-            var globalPath = Path.join(kha, "Tools", "Haxe");
+            var globalPath = Path.join(kha, "Tools", "haxe");
             try {
                 if (Fs.statSync(globalPath).isDirectory()) {
                     return Path.join(globalPath, "haxe" + executableExtension);
