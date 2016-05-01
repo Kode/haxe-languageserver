@@ -38,7 +38,7 @@ class DiagnosticsFeature extends Feature {
                 }
 
             var diagnostics:Array<Diagnostic> = data.map(function (diag) return {
-                range: diag.range,
+                range: doc.byteRangeToRange(diag.range),
                 source: "haxe",
                 code: (diag.kind : Int),
                 severity: Warning,

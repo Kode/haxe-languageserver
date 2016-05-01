@@ -11,8 +11,6 @@ class Context {
     public var documents(default,null):TextDocuments;
     var diagnostics:features.DiagnosticsFeature;
 
-    static inline var HAXE_SERVER_PORT = 6000;
-
     public function new(protocol) {
         this.protocol = protocol;
         protocol.onInitialize = onInitialize;
@@ -25,8 +23,8 @@ class Context {
     function onInitialize(params:InitializeParams, token:RequestToken, resolve:InitializeResult->Void, reject:RejectDataHandler<InitializeError>) {
         workspacePath = params.rootPath;
 
-        haxeServer = new HaxeServer();
-        haxeServer.start(findHaxe(workspacePath, params.initializationOptions.kha), HAXE_SERVER_PORT, token, function(error) {
+        haxeServer = new HaxeServer(this);
+        haxeServer.start(findHaxe(workspacePath, params.initializationOptions.kha), token, function(error) {
             if (error != null)
                 return reject(jsonrpc.JsonRpc.error(0, error, {retry: false}));
 
