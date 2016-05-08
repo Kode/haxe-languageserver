@@ -4,6 +4,7 @@ import js.node.child_process.ChildProcess as ChildProcessObject;
 import js.node.child_process.ChildProcess.ChildProcessEvent;
 import js.node.Buffer;
 import js.node.ChildProcess;
+import js.node.Path;
 import js.node.stream.Readable;
 import jsonrpc.CancellationToken;
 using StringTools;
@@ -25,7 +26,7 @@ class HaxeServer {
 
     public function start(haxePath:String, token:CancellationToken, callback:String->Void) {
         stop();
-        proc = ChildProcess.spawn(haxePath, ["--wait", "stdio"]);
+        proc = ChildProcess.spawn(haxePath, ["--wait", "stdio"], { env: { HAXE_STD_PATH: Path.normalize(Path.join(haxePath, "..", "std")) } });
         buffer = new MessageBuffer();
         nextMessageLength = -1;
         proc.stdout.on(ReadableEvent.Data, function(buf:Buffer) context.protocol.sendVSHaxeLog(buf.toString()));
