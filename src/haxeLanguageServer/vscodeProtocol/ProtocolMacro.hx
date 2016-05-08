@@ -1,8 +1,7 @@
-package vscode;
+package haxeLanguageServer.vscodeProtocol;
 
 import haxe.macro.Context;
 import haxe.macro.Expr;
-import haxe.macro.Type;
 using haxe.macro.Tools;
 
 class ProtocolMacro {
@@ -12,26 +11,26 @@ class ProtocolMacro {
         var requestCases = new Array<Case>();
         var notificationCases = new Array<Case>();
 
-        var ab = switch (Context.getType("ProtocolTypes.MethodName").follow()) {
-            case TAbstract(_.get() => ab, _): ab;
+        var cl = switch (Context.getType("Types.MethodNames").follow()) {
+            case TInst(_.get() => cl, _): cl;
             default: throw false;
         }
-        var abPath = ab.module.split(".");
-        abPath.push(ab.name);
-        for (method in ab.impl.get().statics.get()) {
-            var methodNameExpr = macro $p{abPath.concat([method.name])};
+        var clPath = cl.module.split(".");
+        clPath.push(cl.name);
+        for (method in cl.statics.get()) {
+            var methodNameExpr = macro $p{clPath.concat([method.name])};
             var handlerName = "on" + method.name;
             var handlerArgDefs = [];
             var handlerCallArgs = [];
             switch (method.type) {
-                case TAbstract(_.get() => {name: "Request"}, [params, resultData, errorData]):
+                case TAbstract(_.get() => {name: "RequestMethod"}, [params, resultData, errorData]):
                     var paramsCT = params.toComplexType();
                     if (params.toString() != "Void") {
                         handlerArgDefs.push({name: "params", type: paramsCT});
                         handlerCallArgs.push(macro request.params);
                     }
 
-                    handlerArgDefs.push({name: "token", type: macro : jsonrpc.Protocol.RequestToken});
+                    handlerArgDefs.push({name: "token", type: macro : jsonrpc.CancellationToken});
                     handlerCallArgs.push(macro token);
 
                     var resultDataCT, resolveExpr;
@@ -45,14 +44,15 @@ class ProtocolMacro {
                     handlerArgDefs.push({name: "resolve", type: macro : $resultDataCT->Void});
                     handlerCallArgs.push(resolveExpr);
 
-                    handlerArgDefs.push({name: "reject", type: macro : jsonrpc.Types.ResponseError<Dynamic>->Void});
+                    var errorDataCT = errorData.toComplexType();
+                    handlerArgDefs.push({name: "reject", type: macro : jsonrpc.ResponseError<$errorDataCT>->Void});
                     handlerCallArgs.push(macro reject);
 
                     requestCases.push({
                         values: [methodNameExpr],
                         expr: macro this.$handlerName($a{handlerCallArgs})
                     });
-                case TAbstract(_.get() => {name: "Notification"}, [params]):
+                case TAbstract(_.get() => {name: "NotificationMethod"}, [params]):
                     var paramsCT = params.toComplexType();
                     var sendArgDefs = [];
                     var sendCallArgs = [methodNameExpr];
@@ -98,25 +98,25 @@ class ProtocolMacro {
         var pos = Context.currentPos();
         fields.push({
             pos: pos,
-            name: "handleRequest",
+            name: "processRequest",
             access: [AOverride],
             kind: FFun({
                 ret: null,
                 args: [
                     {name: "request", type: macro : jsonrpc.Types.RequestMessage},
-                    {name: "token", type: macro : jsonrpc.Protocol.RequestToken},
-                    {name: "resolve", type: macro : jsonrpc.Protocol.ResolveHandler},
-                    {name: "reject", type: macro : jsonrpc.Protocol.RejectHandler},
+                    {name: "token", type: macro : jsonrpc.CancellationToken},
+                    {name: "resolve", type: macro : Dynamic->Void},
+                    {name: "reject", type: macro : jsonrpc.ResponseError<Dynamic>->Void},
                 ],
                 expr: {
-                    expr: ESwitch(macro request.method, requestCases, macro reject(jsonrpc.JsonRpc.error(jsonrpc.ErrorCodes.MethodNotFound, "Method '" + request.method + "' not found"))),
+                    expr: ESwitch(macro request.method, requestCases, macro super.processRequest(request, token, resolve, reject)),
                     pos: pos
                 }
             })
         });
         fields.push({
             pos: pos,
-            name: "handleNotification",
+            name: "processNotification",
             access: [AOverride],
             kind: FFun({
                 ret: null,

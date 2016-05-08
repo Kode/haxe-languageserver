@@ -1,18 +1,16 @@
-package features;
+package haxeLanguageServer.features;
 
-import vscode.BasicTypes;
-import vscode.ProtocolTypes;
-import jsonrpc.Protocol;
-import jsonrpc.ErrorCodes.internalError;
-
-import SignatureHelper.*;
+import jsonrpc.CancellationToken;
+import jsonrpc.ResponseError;
+import haxeLanguageServer.vscodeProtocol.Types;
+import haxeLanguageServer.TypeHelper.*;
 
 class HoverFeature extends Feature {
     override function init() {
         context.protocol.onHover = onHover;
     }
 
-    function onHover(params:TextDocumentPositionParams, token:RequestToken, resolve:Hover->Void, reject:RejectHandler) {
+    function onHover(params:TextDocumentPositionParams, token:CancellationToken, resolve:Hover->Void, reject:ResponseError<Void>->Void) {
         var doc = context.documents.get(params.textDocument.uri);
         var bytePos = doc.byteOffsetAt(params.position);
         var args = ["--display", '${doc.fsPath}@$bytePos@type'];
@@ -22,11 +20,11 @@ class HoverFeature extends Feature {
                 return;
 
             var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
+            if (xml == null) return reject(ResponseError.internalError("Invalid xml data: " + data));
 
             var s = StringTools.trim(xml.firstChild().nodeValue);
             if (s.length == 0)
-                return reject(jsonrpc.JsonRpc.error(0, "No type information"));
+                return reject(new ResponseError(0, "No type information"));
 
             var type = switch (parseDisplayType(s)) {
                 case DTFunction(args, ret):
@@ -41,6 +39,6 @@ class HoverFeature extends Feature {
                 result.range = p.range;
 
             resolve(result);
-        });
+        }, function(error) reject(ResponseError.internalError(error)));
     }
 }

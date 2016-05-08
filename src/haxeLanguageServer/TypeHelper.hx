@@ -1,7 +1,8 @@
+package haxeLanguageServer;
+
 using StringTools;
 
-class SignatureHelper {
-    // regexes used by the helper. NOT THREAD SAFE!
+class TypeHelper {
     static var groupRegex = ~/\$(\d)+/g;
     static var parenRegex = ~/^\((.*)\)$/;
     static var argNameRegex = ~/^(\??\w+) : /;

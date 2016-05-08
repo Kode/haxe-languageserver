@@ -1,18 +1,16 @@
-package features;
+package haxeLanguageServer.features;
 
-import vscode.BasicTypes;
-import vscode.ProtocolTypes;
-import jsonrpc.Protocol;
-import jsonrpc.ErrorCodes.internalError;
-
-import SignatureHelper.prepareSignature;
+import jsonrpc.CancellationToken;
+import jsonrpc.ResponseError;
+import haxeLanguageServer.vscodeProtocol.Types;
+import haxeLanguageServer.TypeHelper.prepareSignature;
 
 class CompletionFeature extends Feature {
     override function init() {
         context.protocol.onCompletion = onCompletion;
     }
 
-    function onCompletion(params:TextDocumentPositionParams, token:RequestToken, resolve:Array<CompletionItem>->Void, reject:RejectHandler) {
+    function onCompletion(params:TextDocumentPositionParams, token:CancellationToken, resolve:Array<CompletionItem>->Void, reject:ResponseError<Void>->Void) {
         var doc = context.documents.get(params.textDocument.uri);
         var r = calculateCompletionPosition(doc.content, doc.offsetAt(params.position));
         var bytePos = doc.offsetToByteOffset(r.pos);
@@ -23,11 +21,11 @@ class CompletionFeature extends Feature {
                 return;
 
             var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
+            if (xml == null) return reject(ResponseError.internalError("Invalid xml data: " + data));
 
             var items = if (r.toplevel) parseToplevelCompletion(xml) else parseFieldCompletion(xml);
             resolve(items);
-        });
+        }, function(error) reject(ResponseError.internalError(error)));
     }
 
     static var reFieldPart = ~/\.(\w*)$/;

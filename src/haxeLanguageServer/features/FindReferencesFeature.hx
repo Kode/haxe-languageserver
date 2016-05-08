@@ -1,34 +1,34 @@
-package features;
+package haxeLanguageServer.features;
 
-import haxe.extern.EitherType;
-import vscode.BasicTypes;
-import jsonrpc.Protocol;
-import jsonrpc.ErrorCodes.internalError;
+import jsonrpc.CancellationToken;
+import jsonrpc.ResponseError;
+import haxeLanguageServer.vscodeProtocol.Types;
 
-class GotoDefinitionFeature extends Feature {
+class FindReferencesFeature extends Feature {
     override function init() {
-        context.protocol.onGotoDefinition = onGotoDefinition;
+        context.protocol.onFindReferences = onFindReferences;
     }
 
-    function onGotoDefinition(params:TextDocumentPositionParams, token:RequestToken, resolve:EitherType<Location,Array<Location>>->Void, reject:RejectHandler) {
+    function onFindReferences(params:TextDocumentPositionParams, token:CancellationToken, resolve:Array<Location>->Void, reject:ResponseError<Void>->Void) {
         var doc = context.documents.get(params.textDocument.uri);
         var bytePos = doc.byteOffsetAt(params.position);
-        var args = ["--display", '${doc.fsPath}@$bytePos@position'];
+        var args = ["--display", '${doc.fsPath}@$bytePos@usage'];
         var stdin = if (doc.saved) null else doc.content;
         callDisplay(args, stdin, token, function(data) {
             if (token.canceled)
                 return;
 
             var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
+            if (xml == null) return reject(ResponseError.internalError("Invalid xml data: " + data));
 
             var positions = [for (el in xml.elements()) el.firstChild().nodeValue];
             if (positions.length == 0)
                 return resolve([]);
 
             var results = [];
+            var haxePosCache = new Map();
             for (pos in positions) {
-                var location = HaxePosition.parse(pos, doc, null); // no cache because this right now only returns one position
+                var location = HaxePosition.parse(pos, doc, haxePosCache);
                 if (location == null) {
                     trace("Got invalid position: " + pos);
                     continue;
@@ -37,6 +37,6 @@ class GotoDefinitionFeature extends Feature {
             }
 
             return resolve(results);
-        });
+        }, function(error) reject(ResponseError.internalError(error)));
     }
 }

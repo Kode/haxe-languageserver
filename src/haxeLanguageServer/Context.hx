@@ -1,15 +1,25 @@
-import jsonrpc.Protocol;
+package haxeLanguageServer;
+
+import jsonrpc.CancellationToken;
+import jsonrpc.ResponseError;
+import haxeLanguageServer.vscodeProtocol.Protocol;
+import haxeLanguageServer.vscodeProtocol.Types;
+import haxeLanguageServer.features.*;
 import js.node.Fs;
 import js.node.Path;
-import vscode.ProtocolTypes;
 
 class Context {
     public var workspacePath(default,null):String;
-    public var displayArguments(default,null):Array<String>;
-    public var protocol(default,null):vscode.Protocol;
+    public var displayArguments(get,never):Array<String>;
+    public var protocol(default,null):Protocol;
     public var haxeServer(default,null):HaxeServer;
     public var documents(default,null):TextDocuments;
-    var diagnostics:features.DiagnosticsFeature;
+    var diagnostics:DiagnosticsFeature;
+
+    var displayConfigurations:Array<Array<String>>;
+    var displayConfigurationIndex:Int;
+
+    inline function get_displayArguments() return displayConfigurations[displayConfigurationIndex];
 
     public function new(protocol) {
         this.protocol = protocol;
@@ -18,26 +28,28 @@ class Context {
         protocol.onDidChangeConfiguration = onDidChangeConfiguration;
         protocol.onDidOpenTextDocument = onDidOpenTextDocument;
         protocol.onDidSaveTextDocument = onDidSaveTextDocument;
+        protocol.onVSHaxeDidChangeDisplayConfigurationIndex = onDidChangeDisplayConfigurationIndex;
     }
 
-    function onInitialize(params:InitializeParams, token:RequestToken, resolve:InitializeResult->Void, reject:RejectDataHandler<InitializeError>) {
+    function onInitialize(params:InitializeParams, token:CancellationToken, resolve:InitializeResult->Void, reject:ResponseError<InitializeError>->Void) {
         workspacePath = params.rootPath;
+        displayConfigurationIndex = (params.initializationOptions : InitOptions).displayConfigurationIndex;
 
         haxeServer = new HaxeServer(this);
         haxeServer.start(findHaxe(workspacePath, params.initializationOptions.kha), token, function(error) {
             if (error != null)
-                return reject(jsonrpc.JsonRpc.error(0, error, {retry: false}));
+                return reject(new ResponseError(0, error, {retry: false}));
 
             documents = new TextDocuments(protocol);
 
-            new features.CompletionFeature(this);
-            new features.HoverFeature(this);
-            new features.SignatureHelpFeature(this);
-            new features.GotoDefinitionFeature(this);
-            new features.FindReferencesFeature(this);
-            new features.DocumentSymbolsFeature(this);
+            new CompletionFeature(this);
+            new HoverFeature(this);
+            new SignatureHelpFeature(this);
+            new GotoDefinitionFeature(this);
+            new FindReferencesFeature(this);
+            new DocumentSymbolsFeature(this);
 
-            diagnostics = new features.DiagnosticsFeature(this);
+            diagnostics = new DiagnosticsFeature(this);
 
             return resolve({
                 capabilities: {
@@ -58,7 +70,11 @@ class Context {
         });
     }
 
-    function onShutdown(token:RequestToken, resolve:Void->Void, reject:RejectHandler) {
+    function onDidChangeDisplayConfigurationIndex(params:{index:Int}) {
+        displayConfigurationIndex = params.index;
+    }
+
+    function onShutdown(token:CancellationToken, resolve:Void->Void, _) {
         haxeServer.stop();
         haxeServer = null;
         return resolve();
@@ -66,7 +82,7 @@ class Context {
 
     function onDidChangeConfiguration(config:DidChangeConfigurationParams) {
         var config:Config = config.settings.haxe;
-        displayArguments = config.displayArguments;
+        displayConfigurations = config.displayConfigurations;
     }
 
     function onDidOpenTextDocument(event:DidOpenTextDocumentParams) {
@@ -117,5 +133,9 @@ class Context {
 }
 
 private typedef Config = {
-    var displayArguments:Array<String>;
+    var displayConfigurations:Array<Array<String>>;
+}
+
+private typedef InitOptions = {
+    var displayConfigurationIndex:Int;
 }

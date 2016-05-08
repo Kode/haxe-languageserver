@@ -1,25 +1,23 @@
-package features;
+package haxeLanguageServer.features;
+
+import jsonrpc.CancellationToken;
+import jsonrpc.ResponseError;
+import haxeLanguageServer.vscodeProtocol.Types;
+import haxeLanguageServer.TypeHelper.*;
 
 using StringTools;
-
-import vscode.BasicTypes;
-import vscode.ProtocolTypes;
-import jsonrpc.Protocol;
-import jsonrpc.ErrorCodes.internalError;
-
-import SignatureHelper.*;
 
 class SignatureHelpFeature extends Feature {
     override function init() {
         context.protocol.onSignatureHelp = onSignatureHelp;
     }
 
-    function onSignatureHelp(params:TextDocumentPositionParams, token:RequestToken, resolve:SignatureHelp->Void, reject:RejectHandler) {
+    function onSignatureHelp(params:TextDocumentPositionParams, token:CancellationToken, resolve:SignatureHelp->Void, reject:ResponseError<Void>->Void) {
         var doc = context.documents.get(params.textDocument.uri);
 
         var r = calculateSignaturePosition(doc.content, doc.offsetAt(params.position));
         if (r == null)
-            return reject(jsonrpc.JsonRpc.error(0, "Invalid signature position " + params.position));
+            return reject(new ResponseError(0, "Invalid signature position " + params.position));
 
         var bytePos = doc.offsetToByteOffset(r.pos);
         var args = ["--display", '${doc.fsPath}@$bytePos'];
@@ -30,7 +28,7 @@ class SignatureHelpFeature extends Feature {
 
             data = '<x>$data</x>';
             var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
-            if (xml == null) return reject(internalError("Invalid xml data: " + data));
+            if (xml == null) return reject(ResponseError.internalError("Invalid xml data: " + data));
 
             var signatures = new Array<SignatureInformation>();
             for (el in xml.elements()) {
@@ -54,7 +52,7 @@ class SignatureHelpFeature extends Feature {
                 activeSignature: 0,
                 activeParameter: r.arg,
             });
-        });
+        }, function(error) reject(ResponseError.internalError(error)));
     }
 
     public static function calculateSignaturePosition(text:String, index:Int):SignaturePosition {

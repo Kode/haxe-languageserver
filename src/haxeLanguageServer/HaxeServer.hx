@@ -1,9 +1,11 @@
+package haxeLanguageServer;
+
 import js.node.child_process.ChildProcess as ChildProcessObject;
 import js.node.child_process.ChildProcess.ChildProcessEvent;
 import js.node.Buffer;
 import js.node.ChildProcess;
 import js.node.stream.Readable;
-import jsonrpc.Protocol.RequestToken;
+import jsonrpc.CancellationToken;
 using StringTools;
 
 class HaxeServer {
@@ -21,7 +23,7 @@ class HaxeServer {
         this.context = context;
     }
 
-    public function start(haxePath:String, token:RequestToken, callback:String->Void) {
+    public function start(haxePath:String, token:CancellationToken, callback:String->Void) {
         stop();
         proc = ChildProcess.spawn(haxePath, ["--wait", "stdio"]);
         buffer = new MessageBuffer();
@@ -42,7 +44,7 @@ class HaxeServer {
                 version = [major, minor, patch];
                 callback(null);
             }
-        }, token.error);
+        }, callback);
     }
 
     public function stop() {
@@ -54,13 +56,12 @@ class HaxeServer {
     }
 
     function onExit(_, _) {
-        context.protocol.sendShowMessage({type: Warning, message: "Haxe process was killed, restarting..."});
+        context.protocol.sendVSHaxeLog("Haxe process was killed, restarting...\n");
         proc.removeAllListeners();
-        function onError(error:String) {
+        start(new CancellationTokenSource().token, function(error) {
             if (error != null)
                 context.protocol.sendShowMessage({type: Error, message: error});
-        }
-        start(new RequestToken(onError), onError);
+        });
     }
 
     function onData(data:Buffer) {
@@ -82,10 +83,9 @@ class HaxeServer {
         }
     }
 
-    static var lenBuf = new Buffer(4);
     static var stdinSepBuf = new Buffer([1]);
 
-    public function process(args:Array<String>, token:RequestToken, stdin:String, callback:String->Void, errback:String->Void) {
+    public function process(args:Array<String>, token:CancellationToken, stdin:String, callback:String->Void, errback:String->Void) {
         if (stdin != null) {
             args.push("-D");
             args.push("display-stdin");
@@ -106,12 +106,16 @@ class HaxeServer {
             length += buf.length + stdinSepBuf.length;
         }
 
+        var lenBuf = new Buffer(4);
         lenBuf.writeInt32LE(length, 0);
         proc.stdin.write(lenBuf);
 
         proc.stdin.write(Buffer.concat(chunks, length));
 
         callbacks.push(function(data) {
+            if (token.canceled)
+                return callback(null);
+
             var buf = new StringBuf();
             var hasError = false;
             for (line in data.split("\n")) {
@@ -129,12 +133,12 @@ class HaxeServer {
             var data = buf.toString().trim();
 
             if (hasError)
-                return errback(data);
+                return errback("Error from haxe server: " + data);
 
             try {
                 callback(data);
             } catch (e:Dynamic) {
-                token.error(ErrorUtils.errorToString(e, "Exception while handling haxe completion response: "));
+                errback(jsonrpc.ErrorUtils.errorToString(e, "Exception while handling haxe completion response: "));
             }
         });
     }

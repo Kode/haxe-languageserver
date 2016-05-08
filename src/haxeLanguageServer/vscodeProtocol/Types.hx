@@ -1,89 +1,77 @@
-package vscode;
+package haxeLanguageServer.vscodeProtocol;
 
 import haxe.extern.EitherType;
-
-import vscode.BasicTypes;
-
-/**
-    Helper type for the `MethodName` values.
-    Represents that value of this type is a request.
-**/
-abstract Request<TParams,TResponse,TError>(String) to String {}
-
-/**
-    Helper type for the `MethodName` values.
-    Represents that value of this type is a notification.
-**/
-abstract Notification<TParams>(String) to String {}
+import jsonrpc.Types;
 
 /**
     Method names for the protocol requests and notifications.
-    Each value must be typed as either `Request` or `Notification.
+    Each value must be typed as either `RequestMethod` or `NotificationMethod`.
 **/
-@:enum abstract MethodName<TParams,TResponse,TError>(String) to String from Request<TParams,TResponse,TError> from Notification<TParams> {
+@:publicFields
+class MethodNames {
     /**
         The initialize request is sent as the first request from the client to the server.
     **/
-    var Initialize : Request<InitializeParams,InitializeResult,InitializeError> = "initialize";
+    static inline var Initialize = new RequestMethod<InitializeParams,InitializeResult,InitializeError>("initialize");
 
     /**
         The shutdown request is sent from the client to the server.
         It asks the server to shutdown, but to not exit (otherwise the response might not be delivered correctly to the client).
         There is a separate exit notification that asks the server to exit.
     **/
-    var Shutdown : Request<Void,Void,Void> = "shutdown";
+    static inline var Shutdown = new RequestMethod<Void,Void,Void>("shutdown");
 
     /**
         A notification to ask the server to exit its process.
     **/
-    var Exit : Notification<Void> = "exit";
+    static inline var Exit = new NotificationMethod<Void>("exit");
 
     /**
         The show message notification is sent from a server to a client to ask the client to display a particular message in the user interface.
     **/
-    var ShowMessage : Notification<ShowMessageParams> = "window/showMessage";
+    static inline var ShowMessage = new NotificationMethod<ShowMessageParams>("window/showMessage");
 
     /**
         The log message notification is send from the server to the client to ask the client to log a particular message.
     **/
-    var LogMessage : Notification<LogMessageParams> = "window/logMessage";
+    static inline var LogMessage = new NotificationMethod<LogMessageParams>("window/logMessage");
 
     /**
         A notification send from the client to the server to signal the change of configuration settings.
     **/
-    var DidChangeConfiguration : Notification<DidChangeConfigurationParams> = "workspace/didChangeConfiguration";
+    static inline var DidChangeConfiguration = new NotificationMethod<DidChangeConfigurationParams>("workspace/didChangeConfiguration");
 
     /**
         The document open notification is sent from the client to the server to signal newly opened text documents.
         The document's truth is now managed by the client and the server must not try to read the document's truth using the document's uri.
     **/
-    var DidOpenTextDocument : Notification<DidOpenTextDocumentParams> = "textDocument/didOpen";
+    static inline var DidOpenTextDocument = new NotificationMethod<DidOpenTextDocumentParams>("textDocument/didOpen");
 
     /**
         The document change notification is sent from the client to the server to signal changes to a text document.
     **/
-    var DidChangeTextDocument : Notification<DidChangeTextDocumentParams> = "textDocument/didChange";
+    static inline var DidChangeTextDocument = new NotificationMethod<DidChangeTextDocumentParams>("textDocument/didChange");
 
     /**
         The document close notification is sent from the client to the server when the document got closed in the client.
         The document's truth now exists where the document's uri points to (e.g. if the document's uri is a file uri the truth now exists on disk).
     **/
-    var DidCloseTextDocument : Notification<DidCloseTextDocumentParams> = "textDocument/didClose";
+    static inline var DidCloseTextDocument = new NotificationMethod<DidCloseTextDocumentParams>("textDocument/didClose");
 
     /**
         The document save notification is sent from the client to the server when the document for saved in the clinet.
     **/
-    var DidSaveTextDocument : Notification<DidSaveTextDocumentParams> = "textDocument/didSave";
+    static inline var DidSaveTextDocument = new NotificationMethod<DidSaveTextDocumentParams>("textDocument/didSave");
 
     /**
         The watched files notification is sent from the client to the server when the client detects changes to file watched by the lanaguage client.
     **/
-    var DidChangeWatchedFiles : Notification<DidChangeWatchedFilesParams> = "workspace/didChangeWatchedFiles";
+    static inline var DidChangeWatchedFiles = new NotificationMethod<DidChangeWatchedFilesParams>("workspace/didChangeWatchedFiles");
 
     /**
         Diagnostics notification are sent from the server to the client to signal results of validation runs.
     **/
-    var PublishDiagnostics : Notification<PublishDiagnosticsParams> = "textDocument/publishDiagnostics";
+    static inline var PublishDiagnostics = new NotificationMethod<PublishDiagnosticsParams>("textDocument/publishDiagnostics");
 
     /**
         The Completion request is sent from the client to the server to compute completion items at a given cursor position.
@@ -91,88 +79,282 @@ abstract Notification<TParams>(String) to String {}
         If computing complete completion items is expensive servers can additional provide a handler for the resolve completion item request.
         This request is send when a completion item is selected in the user interface.
     **/
-    var Completion : Request<TextDocumentPositionParams,Array<CompletionItem>,Void> = "textDocument/completion";
+    static inline var Completion = new RequestMethod<TextDocumentPositionParams,Array<CompletionItem>,Void>("textDocument/completion");
 
     /**
         The request is sent from the client to the server to resolve additional information for a given completion item.
     **/
-    var CompletionItemResolve : Request<CompletionItem,CompletionItem,Void> = "completionItem/resolve";
+    static inline var CompletionItemResolve = new RequestMethod<CompletionItem,CompletionItem,Void>("completionItem/resolve");
 
     /**
         The hover request is sent from the client to the server to request hover information at a given text document position.
     **/
-    var Hover : Request<TextDocumentPositionParams,Hover,Void> = "textDocument/hover";
+    static inline var Hover = new RequestMethod<TextDocumentPositionParams,Hover,Void>("textDocument/hover");
 
     /**
         The signature help request is sent from the client to the server to request signature information at a given cursor position.
     **/
-    var SignatureHelp : Request<TextDocumentPositionParams,SignatureHelp,Void> = "textDocument/signatureHelp";
+    static inline var SignatureHelp = new RequestMethod<TextDocumentPositionParams,SignatureHelp,Void>("textDocument/signatureHelp");
 
     /**
         The goto definition request is sent from the client to the server to to resolve the defintion location of a symbol at a given text document position.
     **/
-    var GotoDefinition : Request<TextDocumentPositionParams,EitherType<Location,Array<Location>>,Void> = "textDocument/definition";
+    static inline var GotoDefinition = new RequestMethod<TextDocumentPositionParams,EitherType<Location,Array<Location>>,Void>("textDocument/definition");
 
     /**
         The references request is sent from the client to the server to resolve project-wide references for the symbol denoted by the given text document position.
     **/
-    var FindReferences : Request<ReferenceParams,Array<Location>,Void> = "textDocument/references";
+    static inline var FindReferences = new RequestMethod<ReferenceParams,Array<Location>,Void>("textDocument/references");
 
     /**
         The document highlight request is sent from the client to the server to to resolve a document highlights for a given text document position.
     **/
-    var DocumentHighlights : Request<TextDocumentPositionParams,DocumentHighlight,Void> = "textDocument/documentHighlight";
+    static inline var DocumentHighlights = new RequestMethod<TextDocumentPositionParams,DocumentHighlight,Void>("textDocument/documentHighlight");
 
     /**
         The document symbol request is sent from the client to the server to list all symbols found in a given text document.
     **/
-    var DocumentSymbols : Request<DocumentSymbolParams,Array<SymbolInformation>,Void> = "textDocument/documentSymbol";
+    static inline var DocumentSymbols = new RequestMethod<DocumentSymbolParams,Array<SymbolInformation>,Void>("textDocument/documentSymbol");
 
     /**
         The workspace symbol request is sent from the client to the server to list project-wide symbols matching the query string.
     **/
-    var WorkspaceSymbols : Request<WorkspaceSymbolParams,Array<SymbolInformation>,Void> = "workspace/symbol";
+    static inline var WorkspaceSymbols = new RequestMethod<WorkspaceSymbolParams,Array<SymbolInformation>,Void>("workspace/symbol");
 
     /**
         The code action request is sent from the client to the server to compute commands for a given text document and range.
         The request is trigger when the user moves the cursor into an problem marker in the editor or presses the lightbulb associated with a marker.
     **/
-    var CodeAction : Request<CodeActionParams,Array<Command>,Void> = "textDocument/codeAction";
+    static inline var CodeAction = new RequestMethod<CodeActionParams,Array<Command>,Void>("textDocument/codeAction");
 
     /**
         The code lens request is sent from the client to the server to compute code lenses for a given text document.
     **/
-    var CodeLens : Request<CodeLensParams,Array<CodeLens>,Void> = "textDocument/codeLens";
+    static inline var CodeLens = new RequestMethod<CodeLensParams,Array<CodeLens>,Void>("textDocument/codeLens");
 
     /**
         The code lens resolve request is sent from the clien to the server to resolve the command for a given code lens item.
     **/
-    var CodeLensResolve : Request<CodeLens,CodeLens,Void> = "codeLens/resolve";
+    static inline var CodeLensResolve = new RequestMethod<CodeLens,CodeLens,Void>("codeLens/resolve");
 
     /**
         The document formatting resquest is sent from the server to the client to format a whole document.
     **/
-    var DocumentFormatting : Request<DocumentFormattingParams,Array<TextEdit>,Void> = "textDocument/formatting";
+    static inline var DocumentFormatting = new RequestMethod<DocumentFormattingParams,Array<TextEdit>,Void>("textDocument/formatting");
 
     /**
         The document range formatting request is sent from the client to the server to format a given range in a document.
     **/
-    var DocumentRangeFormatting : Request<DocumentRangeFormattingParams,Array<TextEdit>,Void> = "textDocument/rangeFormatting";
+    static inline var DocumentRangeFormatting = new RequestMethod<DocumentRangeFormattingParams,Array<TextEdit>,Void>("textDocument/rangeFormatting");
 
     /**
         The document on type formatting request is sent from the client to the server to format parts of the document during typing.
     **/
-    var DocumentOnTypeFormatting : Request<DocumentOnTypeFormattingParams,Array<TextEdit>,Void> = "textDocument/onTypeFormatting";
+    static inline var DocumentOnTypeFormatting = new RequestMethod<DocumentOnTypeFormattingParams,Array<TextEdit>,Void>("textDocument/onTypeFormatting");
 
     /**
         The rename request is sent from the client to the server to do a workspace wide rename of a symbol.
     **/
-    var Rename : Request<RenameParams,WorkspaceEdit,Void> = "textDocument/rename";
+    static inline var Rename = new RequestMethod<RenameParams,WorkspaceEdit,Void>("textDocument/rename");
 
     /**
-        This notification is send from the server to the client to ask the client to log a particular message in the vshaxe output channel.
+        This notification is sent from the server to the client to ask the client to log a particular message in the vshaxe output channel.
     **/
-    var VSHaxeLog : Notification<String> = "vshaxe/log";
+    static inline var VSHaxeLog = new NotificationMethod<String>("vshaxe/log");
+
+    /**
+        This notification is sent from the client to the server when display arguments index is changed.
+    **/
+    static inline var VSHaxeDidChangeDisplayConfigurationIndex = new NotificationMethod<{index:Int}>("vshaxe/didChangeDisplayConfigurationIndex");
+}
+
+/**
+    Position in a text document expressed as zero-based line and character offset.
+**/
+typedef Position = {
+    /**
+        Line position in a document (zero-based).
+    **/
+    var line:Int;
+
+    /**
+        Character offset on a line in a document (zero-based).
+    **/
+    var character:Int;
+}
+
+/**
+    A range in a text document expressed as (zero-based) start and end positions.
+**/
+typedef Range = {
+    /**
+        The range's start position
+    **/
+    var start:Position;
+
+    /**
+        The range's end position
+    **/
+    var end:Position;
+}
+
+/**
+    Represents a location inside a resource, such as a line inside a text file.
+**/
+typedef Location = {
+    var uri:String;
+    var range:Range;
+}
+
+/**
+    Represents a diagnostic, such as a compiler error or warning.
+    Diagnostic objects are only valid in the scope of a resource.
+**/
+typedef Diagnostic = {
+    /**
+        The range at which the message applies
+    **/
+    var range:Range;
+
+    /**
+        The diagnostic's severity.
+        If omitted it is up to the client to interpret diagnostics as error, warning, info or hint.
+    **/
+    @:optional var severity:DiagnosticSeverity;
+
+    /**
+        The diagnostic's code.
+    **/
+    @:optional var code:haxe.extern.EitherType<Int,String>;
+
+    /**
+        A human-readable string describing the source of this diagnostic, e.g. 'typescript' or 'super lint'.
+    **/
+    @:optional var source:String;
+
+    /**
+        The diagnostic's message.
+    **/
+    var message:String;
+}
+
+@:enum abstract DiagnosticSeverity(Int) {
+    var Error = 1;
+    var Warning = 2;
+    var Information = 3;
+    var Hint = 4;
+}
+
+/**
+    Represents a reference to a command.
+    Provides a title which will be used to represent a command in the UI and,
+    optionally, an array of arguments which will be passed to the command handler function when invoked.
+**/
+typedef Command  ={
+    /**
+        Title of the command, like `save`.
+    **/
+    var title:String;
+
+    /**
+        The identifier of the actual command handler.
+    **/
+    var command:String;
+
+    /**
+        Arguments that the command handler should be invoked with.
+    **/
+    @:optional var arguments:Array<Dynamic>;
+}
+
+/**
+    A textual edit applicable to a text document.
+**/
+typedef TextEdit = {
+    /**
+        The range of the text document to be manipulated.
+        To insert text into a document create a range where start == end.
+    **/
+    var range:Range;
+
+    /**
+        The string to be inserted.
+        For delete operations use an empty string.
+    **/
+    var newText:String;
+}
+
+/**
+    A workspace edit represents changes to many resources managed in the workspace.
+**/
+typedef WorkspaceEdit = {
+    /**
+        Holds changes to existing resources.
+    **/
+    var changes:haxe.DynamicAccess<Array<TextEdit>>;
+}
+
+/**
+    Text documents are identified using an URI.
+    On the protocol level URI's are passed as strings.
+**/
+typedef TextDocumentIdentifier = {
+    /**
+        The text document's uri.
+    **/
+    var uri:String;
+}
+
+/**
+    An item to transfer a text document from the client to the server.
+**/
+typedef TextDocumentItem = {
+    /**
+        The text document's uri.
+    **/
+    var uri:String;
+
+    /**
+        The text document's language identifier.
+    **/
+    var languageId:String;
+
+    /**
+        The version number of this document (it will strictly increase after each change, including undo/redo).
+    **/
+    var version:Int;
+
+    /**
+        The content of the opened text document.
+    **/
+    var text:String;
+}
+
+/**
+    An identifier to denote a specific version of a text document.
+**/
+typedef VersionedTextDocumentIdentifier = {
+    >TextDocumentIdentifier,
+
+    /**
+        The version number of this document.
+    **/
+    var version:Int;
+}
+
+/**
+    A parameter literal used in requests to pass a text document and a position inside that document.
+**/
+typedef TextDocumentPositionParams = {
+    /**
+        The text document.
+    **/
+    var textDocument:TextDocumentIdentifier;
+
+    /**
+        The position inside the text document.
+    **/
+    var position:Position;
 }
 
 typedef InitializeParams = {
@@ -191,8 +373,11 @@ typedef InitializeParams = {
         The capabilities provided by the client (editor).
     **/
     var capabilities:ClientCapabilities;
-    
-    var initializationOptions:Dynamic;
+
+    /**
+        Initialization options passed from the client.
+    **/
+    @:optional var initializationOptions:Dynamic;
 }
 
 typedef InitializeResult = {
