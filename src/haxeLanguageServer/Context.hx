@@ -10,6 +10,7 @@ import js.node.Path;
 
 class Context {
     public var workspacePath(default,null):String;
+    public var haxePath(default,null):String;
     public var displayArguments(get,never):Array<String>;
     public var protocol(default,null):Protocol;
     public var haxeServer(default,null):HaxeServer;
@@ -33,10 +34,11 @@ class Context {
 
     function onInitialize(params:InitializeParams, token:CancellationToken, resolve:InitializeResult->Void, reject:ResponseError<InitializeError>->Void) {
         workspacePath = params.rootPath;
+        haxePath = findHaxe(workspacePath, params.initializationOptions.kha);
         displayConfigurationIndex = (params.initializationOptions : InitOptions).displayConfigurationIndex;
 
         haxeServer = new HaxeServer(this);
-        haxeServer.start(findHaxe(workspacePath, params.initializationOptions.kha), token, function(error) {
+        haxeServer.start(haxePath, token, function(error) {
             if (error != null)
                 return reject(new ResponseError(0, error, {retry: false}));
 

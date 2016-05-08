@@ -58,7 +58,7 @@ class HaxeServer {
     function onExit(_, _) {
         context.protocol.sendVSHaxeLog("Haxe process was killed, restarting...\n");
         proc.removeAllListeners();
-        start(new CancellationTokenSource().token, function(error) {
+        start(context.haxePath, new CancellationTokenSource().token, function(error) {
             if (error != null)
                 context.protocol.sendShowMessage({type: Error, message: error});
         });
