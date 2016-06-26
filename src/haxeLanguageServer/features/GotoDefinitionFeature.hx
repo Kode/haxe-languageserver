@@ -3,14 +3,15 @@ package haxeLanguageServer.features;
 import haxe.extern.EitherType;
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
-import haxeLanguageServer.vscodeProtocol.Types;
+import jsonrpc.Types.NoData;
+import vscodeProtocol.Types;
 
 class GotoDefinitionFeature extends Feature {
     override function init() {
         context.protocol.onGotoDefinition = onGotoDefinition;
     }
 
-    function onGotoDefinition(params:TextDocumentPositionParams, token:CancellationToken, resolve:EitherType<Location,Array<Location>>->Void, reject:ResponseError<Void>->Void) {
+    function onGotoDefinition(params:TextDocumentPositionParams, token:CancellationToken, resolve:EitherType<Location,Array<Location>>->Void, reject:ResponseError<NoData>->Void) {
         var doc = context.documents.get(params.textDocument.uri);
         var bytePos = doc.byteOffsetAt(params.position);
         var args = ["--display", '${doc.fsPath}@$bytePos@position'];

@@ -2,11 +2,22 @@ package haxeLanguageServer;
 
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
-import haxeLanguageServer.vscodeProtocol.Protocol;
-import haxeLanguageServer.vscodeProtocol.Types;
+import jsonrpc.Types;
+import vscodeProtocol.Protocol;
+import vscodeProtocol.Types;
 import haxeLanguageServer.features.*;
 import js.node.Fs;
 import js.node.Path;
+
+private typedef Config = {
+    var displayConfigurations:Array<Array<String>>;
+    var enableDiagnostics:Bool;
+    var displayServerArguments:Array<String>;
+}
+
+private typedef InitOptions = {
+    var displayConfigurationIndex:Int;
+}
 
 class Context {
     public var workspacePath(default,null):String;
@@ -17,13 +28,17 @@ class Context {
     public var documents(default,null):TextDocuments;
     var diagnostics:DiagnosticsFeature;
 
-    var displayConfigurations:Array<Array<String>>;
+    @:allow(haxeLanguageServer.HaxeServer)
+    var config:Config;
     var displayConfigurationIndex:Int;
 
-    inline function get_displayArguments() return displayConfigurations[displayConfigurationIndex];
+    inline function get_displayArguments() return config.displayConfigurations[displayConfigurationIndex];
 
     public function new(protocol) {
         this.protocol = protocol;
+
+        haxeServer = new HaxeServer(this);
+
         protocol.onInitialize = onInitialize;
         protocol.onShutdown = onShutdown;
         protocol.onDidChangeConfiguration = onDidChangeConfiguration;
@@ -36,65 +51,71 @@ class Context {
         workspacePath = params.rootPath;
         haxePath = findHaxe(workspacePath, params.initializationOptions.kha);
         displayConfigurationIndex = (params.initializationOptions : InitOptions).displayConfigurationIndex;
-
-        haxeServer = new HaxeServer(this);
-        haxeServer.start(haxePath, token, function(error) {
-            if (error != null)
-                return reject(new ResponseError(0, error, {retry: false}));
-
-            documents = new TextDocuments(protocol);
-
-            new CompletionFeature(this);
-            new HoverFeature(this);
-            new SignatureHelpFeature(this);
-            new GotoDefinitionFeature(this);
-            new FindReferencesFeature(this);
-            new DocumentSymbolsFeature(this);
-
-            diagnostics = new DiagnosticsFeature(this);
-
-            return resolve({
-                capabilities: {
-                    textDocumentSync: TextDocuments.syncKind,
-                    completionProvider: {
-                        triggerCharacters: ["."]
-                    },
-                    signatureHelpProvider: {
-                        triggerCharacters: ["(", ","]
-                    },
-                    definitionProvider: true,
-                    hoverProvider: true,
-                    referencesProvider: true,
-                    documentSymbolProvider: true,
-                    codeActionProvider: true
-                }
-            });
+        documents = new TextDocuments(protocol);
+        return resolve({
+            capabilities: {
+                textDocumentSync: TextDocuments.syncKind,
+                completionProvider: {
+                    triggerCharacters: ["."]
+                },
+                signatureHelpProvider: {
+                    triggerCharacters: ["(", ","]
+                },
+                definitionProvider: true,
+                hoverProvider: true,
+                referencesProvider: true,
+                documentSymbolProvider: true,
+                codeActionProvider: true
+            }
         });
     }
 
     function onDidChangeDisplayConfigurationIndex(params:{index:Int}) {
         displayConfigurationIndex = params.index;
+        haxeServer.restart("selected configuration was changed");
     }
 
-    function onShutdown(token:CancellationToken, resolve:Void->Void, _) {
+    function onShutdown(_, token:CancellationToken, resolve:NoData->Void, _) {
         haxeServer.stop();
         haxeServer = null;
-        return resolve();
+        return resolve(null);
     }
 
-    function onDidChangeConfiguration(config:DidChangeConfigurationParams) {
-        var config:Config = config.settings.haxe;
-        displayConfigurations = config.displayConfigurations;
+    function onDidChangeConfiguration(newConfig:DidChangeConfigurationParams) {
+        var firstInit = (config == null);
+
+        config = newConfig.settings.haxe;
+
+        if (firstInit) {
+            haxeServer.start(function() {
+                new CompletionFeature(this);
+                new HoverFeature(this);
+                new SignatureHelpFeature(this);
+                new GotoDefinitionFeature(this);
+                new FindReferencesFeature(this);
+                new DocumentSymbolsFeature(this);
+
+                diagnostics = new DiagnosticsFeature(this);
+                if (config.enableDiagnostics) {
+                    for (doc in documents.getAll())
+                        diagnostics.getDiagnostics(doc.uri);
+                }
+            });
+        } else {
+            haxeServer.restart("configuration was changed");
+        }
     }
 
     function onDidOpenTextDocument(event:DidOpenTextDocumentParams) {
         documents.onDidOpenTextDocument(event);
-        diagnostics.getDiagnostics(event.textDocument.uri);
+        if (diagnostics != null && config.enableDiagnostics)
+            diagnostics.getDiagnostics(event.textDocument.uri);
     }
 
     function onDidSaveTextDocument(event:DidSaveTextDocumentParams) {
         documents.onDidSaveTextDocument(event);
-        diagnostics.getDiagnostics(event.textDocument.uri);
+        if (diagnostics != null && config.enableDiagnostics)
+            diagnostics.getDiagnostics(event.textDocument.uri);
     }
     
     static function findHaxe(projectDir:String, kha:String):String {
@@ -132,12 +153,4 @@ class Context {
         }
         return "";
     }
-}
-
-private typedef Config = {
-    var displayConfigurations:Array<Array<String>>;
-}
-
-private typedef InitOptions = {
-    var displayConfigurationIndex:Int;
 }

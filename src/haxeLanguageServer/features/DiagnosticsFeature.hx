@@ -2,7 +2,8 @@ package haxeLanguageServer.features;
 
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
-import haxeLanguageServer.vscodeProtocol.Types;
+import jsonrpc.Types.NoData;
+import vscodeProtocol.Types;
 
 using StringTools;
 
@@ -100,7 +101,7 @@ class DiagnosticsFeature extends Feature {
         return diagnosticsArguments.get({code: kind, range: range});
     }
 
-    function onCodeAction<T>(params:CodeActionParams, token:CancellationToken, resolve:Array<Command> -> Void, reject:ResponseError<Void> -> Void) {
+    function onCodeAction<T>(params:CodeActionParams, token:CancellationToken, resolve:Array<Command> -> Void, reject:ResponseError<NoData> -> Void) {
         var ret:Array<Command> = [];
         for (d in params.context.diagnostics) {
             var code = new DiagnosticsKind<T>(Std.parseInt(d.code));

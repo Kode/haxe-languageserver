@@ -1,7 +1,7 @@
 package haxeLanguageServer;
 
-import haxeLanguageServer.vscodeProtocol.Protocol;
-import haxeLanguageServer.vscodeProtocol.Types;
+import vscodeProtocol.Protocol;
+import vscodeProtocol.Types;
 
 class TextDocuments {
     public static inline var syncKind = TextDocumentSyncKind.Incremental;
@@ -12,6 +12,10 @@ class TextDocuments {
         documents = new Map();
         protocol.onDidChangeTextDocument = onDidChangeTextDocument;
         protocol.onDidCloseTextDocument = onDidCloseTextDocument;
+    }
+
+    public inline function getAll():Iterator<TextDocument> {
+        return documents.iterator();
     }
 
     public inline function get(uri:String):TextDocument {

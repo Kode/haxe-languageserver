@@ -24,28 +24,35 @@ class HaxeServer {
         this.context = context;
     }
 
-    public function start(haxePath:String, token:CancellationToken, callback:String->Void) {
+    public function start(haxePath:String, callback:Void->Void) {
         stop();
-        proc = ChildProcess.spawn(haxePath, ["--wait", "stdio"], { env: { HAXE_STD_PATH: Path.normalize(Path.join(haxePath, "..", "std")) } });
+
+        var args = context.config.displayServerArguments.concat(["--wait", "stdio"]);
+        proc = ChildProcess.spawn("haxe", args, { env: { HAXE_STD_PATH: Path.normalize(Path.join(haxePath, "..", "std")) } });
+
         buffer = new MessageBuffer();
         nextMessageLength = -1;
         proc.stdout.on(ReadableEvent.Data, function(buf:Buffer) context.protocol.sendVSHaxeLog(buf.toString()));
         proc.stderr.on(ReadableEvent.Data, onData);
+
         proc.on(ChildProcessEvent.Exit, onExit);
-        process(["-version"], token, null, function(data) {
+
+        inline function error(s) context.protocol.sendShowMessage({type: Error, message: s});
+
+        process(["-version"], new CancellationTokenSource().token, null, function(data) {
             if (!reVersion.match(data))
-                return callback("Error parsing haxe version " + data);
+                return error("Error parsing haxe version " + data);
 
             var major = Std.parseInt(reVersion.matched(1));
             var minor = Std.parseInt(reVersion.matched(2));
             var patch = Std.parseInt(reVersion.matched(3));
             if (major < 3 || minor < 3) {
-                callback("Unsupported Haxe version! Minimum version required: 3.3.0");
+                error("Unsupported Haxe version! Minimum version required: 3.3.0");
             } else {
                 version = [major, minor, patch];
-                callback(null);
+                callback();
             }
-        }, callback);
+        }, function(errorMessage) error(errorMessage));
     }
 
     public function stop() {
@@ -54,15 +61,18 @@ class HaxeServer {
             proc.kill();
             proc = null;
         }
+        for (cb in callbacks) // cancel all callbacks
+            cb(null);
+        callbacks = [];
+    }
+
+    public function restart(reason:String) {
+        context.protocol.sendVSHaxeLog('Restarting Haxe completion server: $reason\n');
+        start(context.haxePath, function() {});
     }
 
     function onExit(_, _) {
-        context.protocol.sendVSHaxeLog("Haxe process was killed, restarting...\n");
-        proc.removeAllListeners();
-        start(context.haxePath, new CancellationTokenSource().token, function(error) {
-            if (error != null)
-                context.protocol.sendShowMessage({type: Error, message: error});
-        });
+        restart("Haxe process was killed");
     }
 
     function onData(data:Buffer) {
@@ -114,7 +124,7 @@ class HaxeServer {
         proc.stdin.write(Buffer.concat(chunks, length));
 
         callbacks.push(function(data) {
-            if (token.canceled)
+            if (data == null || token.canceled)
                 return callback(null);
 
             var buf = new StringBuf();

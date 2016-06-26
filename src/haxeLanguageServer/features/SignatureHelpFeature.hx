@@ -2,7 +2,8 @@ package haxeLanguageServer.features;
 
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
-import haxeLanguageServer.vscodeProtocol.Types;
+import jsonrpc.Types.NoData;
+import vscodeProtocol.Types;
 import haxeLanguageServer.TypeHelper.*;
 
 using StringTools;
@@ -12,7 +13,7 @@ class SignatureHelpFeature extends Feature {
         context.protocol.onSignatureHelp = onSignatureHelp;
     }
 
-    function onSignatureHelp(params:TextDocumentPositionParams, token:CancellationToken, resolve:SignatureHelp->Void, reject:ResponseError<Void>->Void) {
+    function onSignatureHelp(params:TextDocumentPositionParams, token:CancellationToken, resolve:SignatureHelp->Void, reject:ResponseError<NoData>->Void) {
         var doc = context.documents.get(params.textDocument.uri);
 
         var r = calculateSignaturePosition(doc.content, doc.offsetAt(params.position));
