@@ -87,7 +87,7 @@ class Context {
         config = newConfig.settings.haxe;
 
         if (firstInit) {
-            haxeServer.start(function() {
+            haxeServer.start(haxePath, function() {
                 new CompletionFeature(this);
                 new HoverFeature(this);
                 new SignatureHelpFeature(this);
