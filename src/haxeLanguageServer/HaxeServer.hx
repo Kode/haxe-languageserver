@@ -36,7 +36,7 @@ class HaxeServer {
             env[key] = context.displayServerConfig.env[key];
         env["HAXE_STD_PATH"] = Path.normalize(Path.join(haxePath, "..", "std"));
 
-        proc = ChildProcess.spawn(context.displayServerConfig.haxePath, args, {env: env});
+        proc = ChildProcess.spawn(haxePath, args, {env: env});
 
         buffer = new MessageBuffer();
         nextMessageLength = -1;
