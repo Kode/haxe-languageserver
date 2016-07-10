@@ -49,7 +49,7 @@ class Context {
 
     function onInitialize(params:InitializeParams, token:CancellationToken, resolve:InitializeResult->Void, reject:ResponseError<InitializeError>->Void) {
         workspacePath = params.rootPath;
-        haxePath = findHaxe(workspacePath, params.initializationOptions.kha);
+        haxePath = findHaxe(params.initializationOptions.kha);
         displayConfigurationIndex = (params.initializationOptions : InitOptions).displayConfigurationIndex;
         documents = new TextDocuments(protocol);
         return resolve({
@@ -118,7 +118,7 @@ class Context {
             diagnostics.getDiagnostics(event.textDocument.uri);
     }
     
-    static function findHaxe(projectDir:String, kha:String):String {
+    static function findHaxe(kha:String):String {
         var executableExtension:String;
         if (js.Node.process.platform == "win32") {
             executableExtension = ".exe";
@@ -134,23 +134,6 @@ class Context {
             executableExtension = "-osx";
         }
         
-        var localPath = Path.join(projectDir, "Kha", "Tools", "haxe");
-        try {
-            if (Fs.statSync(localPath).isDirectory()) {
-                return Path.join(localPath, "haxe" + executableExtension);
-            }
-        }
-        catch (error:Dynamic) {
-            var globalPath = Path.join(kha, "Tools", "haxe");
-            try {
-                if (Fs.statSync(globalPath).isDirectory()) {
-                    return Path.join(globalPath, "haxe" + executableExtension);
-                }
-            }
-            catch (error:Dynamic) {
-            
-            }
-        }
-        return "";
+        return Path.join(kha, "Tools", "haxe", "haxe" + executableExtension);
     }
 }
