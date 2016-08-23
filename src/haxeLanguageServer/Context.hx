@@ -45,7 +45,7 @@ class Context {
     public var protocol(default,null):Protocol;
     public var haxeServer(default,null):HaxeServer;
     public var documents(default,null):TextDocuments;
-    var diagnostics:DiagnosticsFeature;
+    var diagnostics:DiagnosticsManager;
 
     var config:Config;
     @:allow(haxeLanguageServer.HaxeServer)
@@ -115,11 +115,14 @@ class Context {
                 new GotoDefinitionFeature(this);
                 new FindReferencesFeature(this);
                 new DocumentSymbolsFeature(this);
+                new CalculatePackageFeature(this);
 
-                diagnostics = new DiagnosticsFeature(this);
+                diagnostics = new DiagnosticsManager(this);
+                new CodeActionFeature(this, diagnostics);
+
                 if (config.enableDiagnostics) {
                     for (doc in documents.getAll())
-                        diagnostics.getDiagnostics(doc.uri);
+                        diagnostics.publishDiagnostics(doc.uri);
                 }
             });
         } else {
@@ -155,13 +158,24 @@ class Context {
     function onDidOpenTextDocument(event:DidOpenTextDocumentParams) {
         documents.onDidOpenTextDocument(event);
         if (diagnostics != null && config.enableDiagnostics)
-            diagnostics.getDiagnostics(event.textDocument.uri);
+            diagnostics.publishDiagnostics(event.textDocument.uri);
     }
 
     function onDidSaveTextDocument(event:DidSaveTextDocumentParams) {
         documents.onDidSaveTextDocument(event);
         if (diagnostics != null && config.enableDiagnostics)
-            diagnostics.getDiagnostics(event.textDocument.uri);
+            diagnostics.publishDiagnostics(event.textDocument.uri);
+    }
+
+    public function callDisplay(args:Array<String>, stdin:String, token:CancellationToken, callback:String->Void, errback:String->Void) {
+        var actualArgs = ["--cwd", workspacePath + "/build"]; // change cwd to workspace root
+        actualArgs = actualArgs.concat(displayArguments); // add arguments from the workspace settings
+        actualArgs = actualArgs.concat([
+            "-D", "display-details", // get more details in completion results,
+            "--no-output", // prevent anygeneration
+        ]);
+        actualArgs = actualArgs.concat(args); // finally, add given query args
+        haxeServer.process(actualArgs, token, stdin, callback, errback);
     }
     
     static function findHaxe(kha:String):String {
