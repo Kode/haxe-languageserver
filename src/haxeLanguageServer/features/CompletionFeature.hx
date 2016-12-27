@@ -3,41 +3,49 @@ package haxeLanguageServer.features;
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types.NoData;
-import vscodeProtocol.Types;
-import haxeLanguageServer.TypeHelper.prepareSignature;
+import languageServerProtocol.Types;
+import haxeLanguageServer.helper.DocHelper;
+import haxeLanguageServer.helper.TypeHelper.prepareSignature;
+import String as Str;
 
 class CompletionFeature {
     var context:Context;
 
     public function new(context) {
         this.context = context;
-        context.protocol.onCompletion = onCompletion;
+        context.protocol.onRequest(Methods.Completion, onCompletion);
     }
 
     function onCompletion(params:TextDocumentPositionParams, token:CancellationToken, resolve:Array<CompletionItem>->Void, reject:ResponseError<NoData>->Void) {
         var doc = context.documents.get(params.textDocument.uri);
-        var r = calculateCompletionPosition(doc.content, doc.offsetAt(params.position));
+        var offset = doc.offsetAt(params.position);
+        var textBefore = doc.content.substring(0, offset);
+        var r = calculateCompletionPosition(textBefore, offset);
         var bytePos = doc.offsetToByteOffset(r.pos);
         var args = ["--display", '${doc.fsPath}@$bytePos' + (if (r.toplevel) "@toplevel" else "")];
-        var stdin = if (doc.saved) null else doc.content;
-        context.callDisplay(args, stdin, token, function(data) {
+        context.callDisplay(args, doc.content, token, function(data) {
             if (token.canceled)
                 return;
 
-            var xml = try Xml.parse(data).firstElement() catch (_:Dynamic) null;
+            var xml = try Xml.parse(data).firstElement() catch (_:Any) null;
             if (xml == null) return reject(ResponseError.internalError("Invalid xml data: " + data));
 
-            var items = if (r.toplevel) parseToplevelCompletion(xml) else parseFieldCompletion(xml);
+            var items = if (r.toplevel) parseToplevelCompletion(xml) else parseFieldCompletion(xml, textBefore);
             resolve(items);
         }, function(error) reject(ResponseError.internalError(error)));
     }
 
-    static var reFieldPart = ~/\.(\w*)$/;
+    static var reFieldPart = ~/(\.|@(:?))(\w*)$/;
+    static var reStructPart = ~/[(,]\s*{(\s*(\s*\w+\s*:\s*["'\w()\.]+\s*,\s*)*\w*)$/;
     static function calculateCompletionPosition(text:String, index:Int):CompletionPosition {
-        text = text.substring(0, index);
         if (reFieldPart.match(text))
             return {
-                pos: index - reFieldPart.matched(1).length,
+                pos: index - reFieldPart.matched(3).length,
+                toplevel: false,
+            };
+        else if (reStructPart.match(text))
+            return {
+                pos: index - reStructPart.matched(1).length,
                 toplevel: false,
             };
         else
@@ -49,6 +57,7 @@ class CompletionFeature {
 
     static function parseToplevelCompletion(x:Xml):Array<CompletionItem> {
         var result = [];
+        var timers = [];
         for (el in x.elements()) {
             var kind = el.get("k");
             var type = el.get("t");
@@ -58,6 +67,12 @@ class CompletionFeature {
 
             var displayKind = toplevelKindToCompletionItemKind(kind);
             if (displayKind != null) item.kind = displayKind;
+
+            if (isTimerDebugFieldCompletion(name)) {
+                var info = name.split(":");
+                timers.push(getTimerCompletionItem(info[0], info[1]));
+                continue;
+            }
 
             var fullName = name;
             if (kind == "global")
@@ -76,11 +91,12 @@ class CompletionFeature {
 
             var doc = el.get("d");
             if (doc != null)
-                item.documentation = doc;
+                item.documentation = DocHelper.extractText(doc);
 
             result.push(item);
         }
-        return result;
+        sortTimers(timers);
+        return result.concat(timers);
     }
 
     static function toplevelKindToCompletionItemKind(kind:String):CompletionItemKind {
@@ -88,34 +104,96 @@ class CompletionFeature {
             case "local": Variable;
             case "member": Field;
             case "static": Class;
-            case "enum": Enum;
+            case "enum" | "enumabstract": Enum;
             case "global": Variable;
             case "type": Class;
             case "package": Module;
+            case "literal": Keyword;
+            case "timer": Value;
             default: trace("unknown toplevel item kind: " + kind); null;
         }
     }
 
-
-    static function parseFieldCompletion(x:Xml):Array<CompletionItem> {
+    static function parseFieldCompletion(x:Xml, textBefore:String):Array<CompletionItem> {
         var result = [];
+        var timers = [];
         for (el in x.elements()) {
-            var kind = fieldKindToCompletionItemKind(el.get("k"));
+            var rawKind = el.get("k");
+            var kind = fieldKindToCompletionItemKind(rawKind);
             var type = null, doc = null;
+            inline function getOrNull(s) return if (s == "") null else s;
             for (child in el.elements()) {
                 switch (child.nodeName) {
-                    case "t": type = child.firstChild().nodeValue;
-                    case "d": doc = child.firstChild().nodeValue;
+                    case "t": type = getOrNull(child.firstChild().nodeValue);
+                    case "d": doc = getOrNull(child.firstChild().nodeValue);
                 }
             }
             var name = el.get("n");
+            var insertText = null;
+            if (rawKind == "metadata") {
+                name = name.substr(1); // remove the @
+                reFieldPart.match(textBefore);
+                // if there's already a colon, don't duplicate it
+                if (reFieldPart.matched(2) == ":") insertText = name.substr(1);
+            } else if (isTimerDebugFieldCompletion(name)) {
+                timers.push(getTimerCompletionItem(name, type));
+                continue;
+            }
             var item:CompletionItem = {label: name};
-            if (doc != null) item.documentation = doc;
+            if (doc != null) item.documentation = DocHelper.extractText(doc);
             if (kind != null) item.kind = kind;
             if (type != null) item.detail = formatType(type, name, kind);
+            if (insertText != null) item.insertText = insertText;
             result.push(item);
         }
-        return result;
+        sortTimers(timers);
+        return result.concat(timers);
+    }
+
+    static function sortTimers(items:Array<CompletionItem>) {
+        items.sort(function(a, b) {
+            var time1:Float = cast a.data;
+            var time2:Float = cast b.data;
+            if (time1 < time2) return 1;
+            if (time1 > time2) return -1;
+            return 0;
+        });
+
+        for (i in 0...items.length) {
+            items[i].sortText = "_" + Str.fromCharCode(65 + i);
+        }
+    }
+
+    static function getTimerCompletionItem(name:String, time:String):CompletionItem {
+        // avert your eyes...
+        var timeRegex = ~/([0-9.]*)s(?: \(([0-9]*)%\))?/;
+        var seconds = 0.0;
+        var percentage = "--";
+        try {
+            timeRegex.match(time);
+            seconds = Std.parseFloat(timeRegex.matched(1));
+            percentage = timeRegex.matched(2);
+        } catch (e:Dynamic) {}
+        
+        var doc = null;
+        if (name.startsWith("@TIME @TOTAL")) {
+            name = "@Total time: " + time;
+        } else {
+            name = name.replace("@TIME ", '${percentage}% ');
+            doc = seconds + "s";
+        }
+
+        return {
+            label: name,
+            kind: Value,
+            documentation: doc,
+            insertText: " ", // can't be empty string or VSCode will ignore it, but still better than inserting this garbage
+            data: seconds
+        };
+    }
+
+    static inline function isTimerDebugFieldCompletion(name:String):Bool {
+        return name.startsWith("@TIME") || name.startsWith("@TOTAL");
     }
 
     static function formatType(type:String, name:String, kind:CompletionItemKind):String {
@@ -131,6 +209,8 @@ class CompletionFeature {
             case "method": Method;
             case "type": Class;
             case "package": Module;
+            case "metadata": Function;
+            case "timer": Value;
             default: trace("unknown field item kind: " + kind); null;
         }
     }

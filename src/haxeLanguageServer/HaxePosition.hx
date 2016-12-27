@@ -1,6 +1,6 @@
 package haxeLanguageServer;
 
-import vscodeProtocol.Types.Location;
+import languageServerProtocol.Types.Location;
 
 class HaxePosition {
     static var positionRe = ~/^(.+):(\d+): (?:lines (\d+)-(\d+)|character(?:s (\d+)-| )(\d+))$/;
@@ -20,7 +20,7 @@ class HaxePosition {
                 uri: if (file == doc.fsPath) doc.uri else Uri.fsPathToUri(file),
                 range: {
                     start: {line: startLine - 1, character: 0},
-                    end: {line: endLine - 1, character: 0},
+                    end: {line: endLine, character: 0}, // don't -1 the end line, since we're poiting to the start of the next line
                 }
             };
         } else { // char span
@@ -73,7 +73,7 @@ class HaxePosition {
         return buf.toString("utf-8", 0, byteOffset).length;
     }
 
-    static function getProperFileNameCase(normalizedPath:String):String {
+    public static function getProperFileNameCase(normalizedPath:String):String {
         if (!isWindows) return normalizedPath;
         if (properFileNameCaseCache == null) {
             properFileNameCaseCache = new Map();

@@ -3,8 +3,8 @@ package haxeLanguageServer;
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types;
-import vscodeProtocol.Protocol;
-import vscodeProtocol.Types;
+import jsonrpc.Protocol;
+import languageServerProtocol.Types;
 import haxeLanguageServer.features.*;
 import js.node.Fs;
 import js.node.Path;
@@ -25,7 +25,11 @@ private typedef DisplayServerConfig = {
 private typedef Config = {
     var displayConfigurations:Array<Array<String>>;
     var enableDiagnostics:Bool;
+    var diagnosticsPathFilter:String;
+    var enableCodeLens:Bool;
     var displayServer:DisplayServerConfig;
+    var displayPort:Null<Int>;
+    var buildCompletionCache:Bool;
 }
 
 private typedef InitOptions = {
@@ -47,7 +51,7 @@ class Context {
     public var documents(default,null):TextDocuments;
     var diagnostics:DiagnosticsManager;
 
-    var config:Config;
+    public var config(default, null):Config;
     @:allow(haxeLanguageServer.HaxeServer)
     var displayServerConfig:DisplayServerConfigBase;
     var displayConfigurationIndex:Int;
@@ -59,12 +63,20 @@ class Context {
 
         haxeServer = new HaxeServer(this);
 
-        protocol.onInitialize = onInitialize;
-        protocol.onShutdown = onShutdown;
-        protocol.onDidChangeConfiguration = onDidChangeConfiguration;
-        protocol.onDidOpenTextDocument = onDidOpenTextDocument;
-        protocol.onDidSaveTextDocument = onDidSaveTextDocument;
-        protocol.onVSHaxeDidChangeDisplayConfigurationIndex = onDidChangeDisplayConfigurationIndex;
+        protocol.onRequest(Methods.Initialize, onInitialize);
+        protocol.onRequest(Methods.Shutdown, onShutdown);
+        protocol.onNotification(Methods.DidChangeConfiguration, onDidChangeConfiguration);
+        protocol.onNotification(Methods.DidOpenTextDocument, onDidOpenTextDocument);
+        protocol.onNotification(Methods.DidSaveTextDocument, onDidSaveTextDocument);
+        protocol.onNotification(VshaxeMethods.DidChangeDisplayConfigurationIndex, onDidChangeDisplayConfigurationIndex);
+    }
+
+    public inline function sendShowMessage(type:MessageType, message:String) {
+        protocol.sendNotification(Methods.ShowMessage, {type: type, message: message});
+    }
+
+    public inline function sendLogMessage(type:MessageType, message:String) {
+        protocol.sendNotification(Methods.LogMessage, {type: type, message: message});
     }
 
     function onInitialize(params:InitializeParams, token:CancellationToken, resolve:InitializeResult->Void, reject:ResponseError<InitializeError>->Void) {
@@ -76,7 +88,7 @@ class Context {
             capabilities: {
                 textDocumentSync: TextDocuments.syncKind,
                 completionProvider: {
-                    triggerCharacters: ["."]
+                    triggerCharacters: [".", "@", ":"]
                 },
                 signatureHelpProvider: {
                     triggerCharacters: ["(", ","]
@@ -85,7 +97,11 @@ class Context {
                 hoverProvider: true,
                 referencesProvider: true,
                 documentSymbolProvider: true,
-                codeActionProvider: true
+                workspaceSymbolProvider: true,
+                codeActionProvider: true,
+                codeLensProvider: {
+                    resolveProvider: true
+                }
             }
         });
     }
@@ -115,10 +131,11 @@ class Context {
                 new GotoDefinitionFeature(this);
                 new FindReferencesFeature(this);
                 new DocumentSymbolsFeature(this);
-                new CalculatePackageFeature(this);
+                new DeterminePackageFeature(this);
 
                 diagnostics = new DiagnosticsManager(this);
                 new CodeActionFeature(this, diagnostics);
+                new CodeLensFeature(this);
 
                 if (config.enableDiagnostics) {
                     for (doc in documents.getAll())
@@ -162,7 +179,6 @@ class Context {
     }
 
     function onDidSaveTextDocument(event:DidSaveTextDocumentParams) {
-        documents.onDidSaveTextDocument(event);
         if (diagnostics != null && config.enableDiagnostics)
             diagnostics.publishDiagnostics(event.textDocument.uri);
     }

@@ -1,9 +1,7 @@
-package haxeLanguageServer;
-
-using StringTools;
+package haxeLanguageServer.helper;
 
 class TypeHelper {
-    static var groupRegex = ~/\$(\d)+/g;
+    static var groupRegex = ~/\$(\d+)/g;
     static var parenRegex = ~/^\((.*)\)$/;
     static var argNameRegex = ~/^(\??\w+) : /;
     static var monomorphRegex = ~/^Unknown<\d+>$/;

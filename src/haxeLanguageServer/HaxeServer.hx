@@ -1,5 +1,6 @@
 package haxeLanguageServer;
 
+import js.node.net.Socket;
 import js.node.child_process.ChildProcess as ChildProcessObject;
 import js.node.child_process.ChildProcess.ChildProcessEvent;
 import js.node.Buffer;
@@ -7,7 +8,6 @@ import js.node.ChildProcess;
 import js.node.Path;
 import js.node.stream.Readable;
 import jsonrpc.CancellationToken;
-using StringTools;
 
 private class DisplayRequest {
     // these are used for the queue
@@ -19,15 +19,17 @@ private class DisplayRequest {
     var stdin:String;
     var callback:String->Void;
     var errback:String->Void;
+    public var socket:Null<Socket>;
 
     static var stdinSepBuf = new Buffer([1]);
 
-    public function new(token:CancellationToken, args:Array<String>, stdin:String, callback:String->Void, errback:String->Void) {
+    public function new(token:CancellationToken, args:Array<String>, stdin:String, callback:String->Void, errback:String->Void, socket) {
         this.token = token;
         this.args = args;
         this.stdin = stdin;
         this.callback = callback;
         this.errback = errback;
+        this.socket = socket;
     }
 
     public function prepareBody():Buffer {
@@ -66,7 +68,12 @@ private class DisplayRequest {
         for (line in data.split("\n")) {
             switch (line.fastCodeAt(0)) {
                 case 0x01: // print
-                    trace("Haxe print:\n" + line.substring(1).replace("\x01", "\n"));
+                    var line = line.substring(1).replace("\x01", "\n");
+                    if (socket != null) {
+                        socket.write(line);
+                    } else {
+                        trace("Haxe print:\n" + line);
+                    }
                 case 0x02: // error
                     hasError = true;
                 default:
@@ -78,19 +85,18 @@ private class DisplayRequest {
         var data = buf.toString().trim();
 
         if (hasError)
-            return errback("Error from haxe server: " + data);
+            return errback("Error from Haxe server: " + data);
 
         try {
             callback(data);
-        } catch (e:Dynamic) {
-            errback(jsonrpc.ErrorUtils.errorToString(e, "Exception while handling haxe completion response: "));
+        } catch (e:Any) {
+            errback(jsonrpc.ErrorUtils.errorToString(e, "Exception while handling Haxe completion response: "));
         }
     }
 }
 
 class HaxeServer {
     var proc:ChildProcessObject;
-    var version:Array<Int>;
     static var reVersion = ~/^(\d+)\.(\d+)\.(\d+)(?:\s.*)?$/;
 
     var buffer:MessageBuffer;
@@ -100,15 +106,18 @@ class HaxeServer {
     var requestsHead:DisplayRequest;
     var requestsTail:DisplayRequest;
     var currentRequest:DisplayRequest;
+    var socketListener:js.node.net.Server;
 
     public function new(context:Context) {
         this.context = context;
     }
 
+    static var reTrailingNewline = ~/\r?\n$/;
+
     public function start(haxePath:String, callback:Void->Void) {
         stop();
 
-        var args = context.displayServerConfig.arguments.concat(["--wait", "stdio"]);
+        inline function error(s) context.sendShowMessage(Error, s);
 
         var env = new haxe.DynamicAccess();
         for (key in js.Node.process.env.keys())
@@ -117,31 +126,75 @@ class HaxeServer {
             env[key] = context.displayServerConfig.env[key];
         env["HAXE_STD_PATH"] = Path.normalize(Path.join(haxePath, "..", "std"));
 
-        proc = ChildProcess.spawn(haxePath, args, {env: env});
+        var checkRun = ChildProcess.spawnSync(haxePath, ["-version"], {env: env});
+        if (checkRun.error != null)
+            return error('Error starting Haxe server: ${checkRun.error}');
+
+        var output = (checkRun.stderr : Buffer).toString().trim();
+
+        if (checkRun.status != 0)
+            return error("Haxe version check failed: " + output);
+
+        if (!reVersion.match(output))
+            return error("Error parsing Haxe version " + haxe.Json.stringify(output));
+
+        var major = Std.parseInt(reVersion.matched(1));
+        var minor = Std.parseInt(reVersion.matched(2));
+        var patch = Std.parseInt(reVersion.matched(3));
+        if (major < 3 || minor < 4)
+            return error("Unsupported Haxe version! Minimum version required: 3.4.0");
 
         buffer = new MessageBuffer();
         nextMessageLength = -1;
-        proc.stdout.on(ReadableEvent.Data, function(buf:Buffer) context.protocol.sendVSHaxeLog(buf.toString()));
+
+        proc = ChildProcess.spawn(haxePath, context.displayServerConfig.arguments.concat(["--wait", "stdio"]), {env: env});
+
+        proc.stdout.on(ReadableEvent.Data, function(buf:Buffer) {
+            context.sendLogMessage(Log, reTrailingNewline.replace(buf.toString(), ""));
+        });
         proc.stderr.on(ReadableEvent.Data, onData);
 
         proc.on(ChildProcessEvent.Exit, onExit);
 
-        inline function error(s) context.protocol.sendShowMessage({type: Error, message: s});
+        if (context.config.buildCompletionCache) {
+            trace("Initializing completion cache...");
+            process(context.displayArguments.concat(["--no-output"]), null, null, function(_) {
+                trace("Done.");
+            }, function(errorMessage) {
+                trace("Failed - try fixing the error(s) and restarting the language server:\n\n" + errorMessage);
+            });
+        }
 
-        process(["-version"], null, null, function(data) {
-            if (!reVersion.match(data))
-                return error("Error parsing haxe version " + data);
+        if (context.config.displayPort != null)
+            startSocketServer(context.config.displayPort);
 
-            var major = Std.parseInt(reVersion.matched(1));
-            var minor = Std.parseInt(reVersion.matched(2));
-            var patch = Std.parseInt(reVersion.matched(3));
-            if (major < 3 || minor < 3) {
-                error("Unsupported Haxe version! Minimum version required: 3.3.0");
-            } else {
-                version = [major, minor, patch];
-                callback();
-            }
-        }, function(errorMessage) error(errorMessage));
+        callback();
+    }
+
+    public function startSocketServer(port:Int) {
+        if (socketListener != null) {
+            socketListener.close();
+        }
+        socketListener = js.node.Net.createServer(function(socket) {
+            trace("Client connected");
+            socket.on('data', function(data:Buffer) {
+                var s = data.toString();
+                var split = s.split("\n");
+                split.pop(); // --connect passes extra \0
+                function send(message:String) {
+                    socket.write(message);
+                    socket.end();
+                    socket.destroy();
+                    trace("Client disconnected");
+                }
+                process(split, null, null, send, send, socket);
+            });
+            socket.on('error', function(err) {
+                 trace("Socket error: " + err);
+            });
+        });
+        socketListener.listen(port);
+        context.sendLogMessage(Log, 'Listening on port $port');
     }
 
     public function stop() {
@@ -149,6 +202,10 @@ class HaxeServer {
             proc.removeAllListeners();
             proc.kill();
             proc = null;
+        }
+
+        if (socketListener != null) {
+            socketListener.close();
         }
 
         // cancel all callbacks
@@ -162,7 +219,7 @@ class HaxeServer {
     }
 
     public function restart(reason:String) {
-        context.protocol.sendVSHaxeLog('Restarting Haxe completion server: $reason\n');
+        context.sendLogMessage(Log, 'Restarting Haxe completion server: $reason');
         start(context.haxePath, function() {});
     }
 
@@ -192,9 +249,9 @@ class HaxeServer {
         }
     }
 
-    public function process(args:Array<String>, token:CancellationToken, stdin:String, callback:String->Void, errback:String->Void) {
+    public function process(args:Array<String>, token:CancellationToken, stdin:String, callback:String->Void, errback:String->Void, socket:Socket = null) {
         // create a request object
-        var request = new DisplayRequest(token, args, stdin, callback, errback);
+        var request = new DisplayRequest(token, args, stdin, callback, errback, socket);
 
         // if the request is cancellable, set a cancel callback to remove request from queue
         if (token != null) {

@@ -1,108 +1,236 @@
 package haxeLanguageServer.features;
 
-import vscodeProtocol.Types;
-using StringTools;
+import haxeLanguageServer.helper.PathHelper;
+import haxeLanguageServer.helper.ImportHelper;
+import languageServerProtocol.Types;
+import js.node.ChildProcess;
 
 class DiagnosticsManager {
     var context:Context;
-    var diagnosticsArguments:DiagnosticsMap<Dynamic>;
+    var diagnosticsArguments:Map<String,DiagnosticsMap<Any>>;
+    var haxelibPath:String;
 
     public function new(context:Context) {
         this.context = context;
-        diagnosticsArguments = new DiagnosticsMap();
+        diagnosticsArguments = new Map();
+        context.protocol.onNotification(VshaxeMethods.RunGlobalDiagnostics, onRunGlobalDiagnostics);
+        ChildProcess.exec("haxelib config", function(error, stdout, stderr) haxelibPath = stdout.trim());
+    }
+
+    function onRunGlobalDiagnostics(_) {
+        context.callDisplay(["--display", "diagnostics"], null, null, processDiagnosticsReply.bind(null), processErrorReply);
+    }
+
+    function processErrorReply(error:String) {
+        context.sendLogMessage(Log, error);
+    }
+
+    function processDiagnosticsReply(uri:Null<String>, s:String) {
+        var data:Array<HaxeDiagnosticsResponse<Any>> =
+            try haxe.Json.parse(s)
+            catch (e:Any) {
+                trace("Error parsing diagnostics response: " + Std.string(e));
+                return;
+            }
+
+        var pathFilter = PathHelper.preparePathFilter(context.config.diagnosticsPathFilter, haxelibPath, context.workspacePath);
+        var sent = new Map<String,Bool>();
+        for (data in data) {
+            if (PathHelper.matches(data.file, pathFilter)) {
+                var uri = Uri.fsPathToUri(data.file);
+                var argumentsMap = diagnosticsArguments[uri] = new DiagnosticsMap();
+                // var doc = context.documents.get(uri);
+                // if (doc == null) {
+                //     return;
+                // }
+                var diagnostics = new Array<Diagnostic>();
+                for (hxDiag in data.diagnostics) {
+                    if (hxDiag.range == null)
+                        continue;
+                    var diag:Diagnostic = {
+                        // range: doc.byteRangeToRange(hxDiag.range),
+                        range: hxDiag.range,
+                        source: "haxe",
+                        code: (hxDiag.kind : Int),
+                        severity: hxDiag.severity,
+                        message: hxDiag.kind.getMessage(hxDiag.args)
+                    }
+                    argumentsMap.set({code: diag.code, range: diag.range}, hxDiag.args);
+                    diagnostics.push(diag);
+                }
+                context.protocol.sendNotification(Methods.PublishDiagnostics, {uri: uri, diagnostics: diagnostics});
+                sent[uri] = true;
+            }
+        }
+
+        inline function removeOldDiagnostsics(uri:String) {
+            if (!sent.exists(uri)) clearDiagnostics(uri);
+        }
+
+        if (uri == null) {
+            for (uri in diagnosticsArguments.keys())
+                removeOldDiagnostsics(uri);
+        } else {
+            removeOldDiagnostsics(uri);
+        }
+    }
+
+    inline function clearDiagnostics(uri:String) {
+        if (diagnosticsArguments.remove(uri))
+            context.protocol.sendNotification(Methods.PublishDiagnostics, {uri: uri, diagnostics: []});
     }
 
     public function publishDiagnostics(uri:String) {
         var doc = context.documents.get(uri);
-        function processReply(s:String) {
-            diagnosticsArguments = new DiagnosticsMap();
-            var data:Array<HaxeDiagnostics<Dynamic>> =
-                try haxe.Json.parse(s)
-                catch (e:Dynamic) {
-                    trace("Error parsing diagnostics response: " + e);
-                    return;
-                }
-
-            var diagnostics = new Array<Diagnostic>();
-            for (hxDiag in data) {
-                if (hxDiag.range == null)
-                    continue;
-                var diag:Diagnostic = {
-                    range: doc.byteRangeToRange(hxDiag.range),
-                    source: "haxe",
-                    code: (hxDiag.kind : Int),
-                    severity: hxDiag.severity,
-                    message: hxDiag.kind.getMessage(hxDiag.args)
-                }
-                diagnosticsArguments.set({code: diag.code, range: diag.range}, hxDiag.args);
-                diagnostics.push(diag);
-            }
-
-            context.protocol.sendPublishDiagnostics({uri: uri, diagnostics: diagnostics});
-        }
-        function processError(error:String) {
-            context.protocol.sendLogMessage({type: Error, message: error});
-        }
-        context.callDisplay(["--display", doc.fsPath + "@0@diagnostics"], null, null, processReply, processError);
+        context.callDisplay(["--display", doc.fsPath + "@0@diagnostics"], null, null, processDiagnosticsReply.bind(uri), processErrorReply);
     }
 
-    public function addCodeActions<T>(params:CodeActionParams, actions:Array<Command>) {
+    static var reEndsWithWhitespace = ~/\s*$/;
+    static var reStartsWhitespace = ~/^\s*/;
+
+    public function getCodeActions<T>(params:CodeActionParams) {
+        var actions:Array<Command> = [];
         for (d in params.context.diagnostics) {
             if (!(d.code is Int)) // our codes are int, so we don't handle other stuff
                 continue;
             var code = new DiagnosticsKind<T>(d.code);
-            switch (code) {
-                case DKUnusedImport:
-                    actions.push({
-                        title: "Remove import",
-                        command: "haxe.applyFixes",
-                        arguments: [params.textDocument.uri, 0 /*TODO*/, [{range: d.range, newText: ""}]]
-                    });
-                case DKUnresolvedIdentifier:
-                    var args = getDiagnosticsArguments(code, d.range);
-                    for (arg in args) {
-                        var kind = new UnresolvedIdentifierSuggestion(d.code);
-                        var command:Command = switch (kind) {
-                            case UISImport: {
-                                title: "import " + arg.name,
-                                command: "haxe.applyFixes", // TODO
-                                arguments: []
-                            }
-                            case UISTypo: {
-                                title: "Change to " +arg.name,
-                                command: "haxe.applyFixes",
-                                arguments: [params.textDocument.uri, 0, [{range: d.range, newText: arg.name}]]
-                            }
-                        }
-                        actions.push(command);
-                    }
-                case DKCompilerError:
-                    var arg = getDiagnosticsArguments(code, d.range);
-                    var sugrex = ~/\(Suggestions?: (.*)\)/;
-                    if (sugrex.match(arg)) {
-                        var suggestions = sugrex.matched(1).split(",");
-                        // Haxe reports the entire expression, not just the field position, so we have to be a bit creative here.
-                        var range = d.range;
-                        var fieldrex = ~/has no field ([^ ]+) /;
-                        if (fieldrex.match(arg)) {
-                            var fieldName = fieldrex.matched(1);
-                            range.start.character += range.end.character - fieldrex.matched(1).length - 2;
-                        }
-                        for (suggestion in suggestions) {
-                            suggestion = suggestion.trim();
-                            actions.push({
-                                title: "Change to " + suggestion,
-                                command: "haxe.applyFixes",
-                                arguments: [params.textDocument.uri, 0, [{range: range, newText: suggestion}]]
-                            });
-                        }
-                    }
-            }
+            actions = actions.concat(switch (code) {
+                case DKUnusedImport: getUnusedImportActions(params, d);
+                case DKUnresolvedIdentifier: getUnresolvedIdentifierActions(params, d);
+                case DKCompilerError: getCompilerErrorActions(params, d);
+                case DKRemovableCode: getRemovableCodeActions(params, d);
+            });
         }
+        return actions;
     }
 
-    inline function getDiagnosticsArguments<T>(kind:DiagnosticsKind<T>, range:Range):T {
-        return diagnosticsArguments.get({code: kind, range: range});
+    function getUnusedImportActions(params:CodeActionParams, d:Diagnostic):Array<Command> {
+        var doc = context.documents.get(params.textDocument.uri);
+
+        function patchRange(range:Range) {
+            var startLine = doc.lineAt(range.start.line);
+            if (reStartsWhitespace.match(startLine.substring(0, range.start.character)))
+                range = {
+                    start: {
+                        line: range.start.line,
+                        character: 0
+                    },
+                    end: range.end
+                };
+
+            var endLine = if (range.start.line == range.end.line) startLine else doc.lineAt(range.end.line);
+            if (reEndsWithWhitespace.match(endLine.substring(range.end.character)))
+                range = {
+                    start: range.start,
+                    end: {
+                        line: range.end.line + 1,
+                        character: 0
+                    }
+                };
+            return range;
+        }
+
+        var ret:Array<Command> = [{
+            title: "Remove import",
+            command: "haxe.applyFixes",
+            arguments: [params.textDocument.uri, 0 /*TODO*/, [{range: patchRange(d.range), newText: ""}]]
+        }];
+
+        var map = diagnosticsArguments[params.textDocument.uri];
+        if (map != null) {
+            var fixes = [
+                for (key in map.keys())
+                    if (key.code == DKUnusedImport)
+                        {range: patchRange(key.range), newText: ""}
+            ];
+
+            if (fixes.length > 1) {
+                ret.unshift({
+                    title: "Remove all unused imports/usings",
+                    command: "haxe.applyFixes",
+                    arguments: [params.textDocument.uri, 0, fixes]
+                });
+            }
+        }
+
+        return ret;
+    }
+
+    function getUnresolvedIdentifierActions(params:CodeActionParams, d:Diagnostic):Array<Command> {
+        var actions:Array<Command> = [];
+        var args = getDiagnosticsArguments(params.textDocument.uri, DKUnresolvedIdentifier, d.range);
+        for (arg in args) {
+            actions = actions.concat(switch (arg.kind) {
+                case UISImport: getUnresolvedImportActions(params, d, arg);
+                case UISTypo: getTypoActions(params, d, arg);
+            });
+        }
+        return actions;
+    }
+
+    function getUnresolvedImportActions(params:CodeActionParams, d:Diagnostic, arg):Array<Command> {
+        var doc = context.documents.get(params.textDocument.uri);
+        var importPos = ImportHelper.getImportInsertPosition(doc);
+        var importRange = { start: importPos, end: importPos };
+        return [{
+            title: "Import " + arg.name,
+            command: "haxe.applyFixes",
+            arguments: [params.textDocument.uri, 0, [{range: importRange, newText: 'import ${arg.name};\n'}]]
+        }, {
+            title: "Change to " + arg.name,
+            command: "haxe.applyFixes",
+            arguments: [params.textDocument.uri, 0, [{range: d.range, newText: arg.name}]]
+        }];
+    }
+
+    function getTypoActions(params:CodeActionParams, d:Diagnostic, arg):Array<Command> {
+        return [{
+            title: "Change to " + arg.name,
+            command: "haxe.applyFixes",
+            arguments: [params.textDocument.uri, 0, [{range: d.range, newText: arg.name}]]
+        }];
+    }
+
+    function getCompilerErrorActions(params:CodeActionParams, d:Diagnostic):Array<Command> {
+        var actions:Array<Command> = [];
+        var arg = getDiagnosticsArguments(params.textDocument.uri, DKCompilerError, d.range);
+        var sugrex = ~/\(Suggestions?: (.*)\)/;
+        if (sugrex.match(arg)) {
+            var suggestions = sugrex.matched(1).split(",");
+            // Haxe reports the entire expression, not just the field position, so we have to be a bit creative here.
+            var range = d.range;
+            var fieldrex = ~/has no field ([^ ]+) /;
+            if (fieldrex.match(arg)) {
+                range.start.character += range.end.character - fieldrex.matched(1).length - 2;
+            }
+            for (suggestion in suggestions) {
+                suggestion = suggestion.trim();
+                actions.push({
+                    title: "Change to " + suggestion,
+                    command: "haxe.applyFixes",
+                    arguments: [params.textDocument.uri, 0, [{range: range, newText: suggestion}]]
+                });
+            }
+        }
+        return actions;
+    }
+
+    function getRemovableCodeActions(params:CodeActionParams, d:Diagnostic):Array<Command> {
+        var range = getDiagnosticsArguments(params.textDocument.uri, DKRemovableCode, d.range).range;
+        if (range == null) {
+            return [];
+        }
+        return [{
+            title: "Remove",
+            command: "haxe.applyFixes",
+            arguments: [params.textDocument.uri, 0, [{range: range, newText: ""}]]
+        }];
+    }
+
+    inline function getDiagnosticsArguments<T>(uri:String, kind:DiagnosticsKind<T>, range:Range):T {
+        var map = diagnosticsArguments[uri];
+        if (map == null) return null;
+        return map.get({code: kind, range: range});
     }
 }
 
@@ -121,6 +249,7 @@ class DiagnosticsManager {
     var DKUnusedImport:DiagnosticsKind<Void> = 0;
     var DKUnresolvedIdentifier:DiagnosticsKind<Array<{kind: UnresolvedIdentifierSuggestion, name: String}>> = 1;
     var DKCompilerError:DiagnosticsKind<String> = 2;
+    var DKRemovableCode:DiagnosticsKind<{description:String, range:Range}> = 3;
 
     public inline function new(i:Int) {
         this = i;
@@ -131,6 +260,7 @@ class DiagnosticsManager {
             case DKUnusedImport: "Unused import";
             case DKUnresolvedIdentifier: "Unresolved identifier";
             case DKCompilerError: args;
+            case DKRemovableCode: args.description;
         }
     }
 }
@@ -140,6 +270,11 @@ private typedef HaxeDiagnostics<T> = {
     var range:Range;
     var severity:DiagnosticSeverity;
     var args:T;
+}
+
+private typedef HaxeDiagnosticsResponse<T> = {
+    var file:String;
+    var diagnostics:Array<HaxeDiagnostics<T>>;
 }
 
 private typedef DiagnosticsMapKey = {code: Int, range:Range};
