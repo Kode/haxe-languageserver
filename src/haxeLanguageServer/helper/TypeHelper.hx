@@ -1,5 +1,16 @@
 package haxeLanguageServer.helper;
 
+typedef FunctionFormattingConfig = {
+    var argumentTypeHints:Bool;
+    var returnTypeHint:ReturnTypeHintOption;
+}
+
+@:enum abstract ReturnTypeHintOption(String) {
+    var Always = "always";
+    var Never = "never";
+    var NonVoid = "non-void";
+}
+
 class TypeHelper {
     static var groupRegex = ~/\$(\d+)/g;
     static var parenRegex = ~/^\((.*)\)$/;
@@ -19,37 +30,64 @@ class TypeHelper {
     public static function prepareSignature(type:String):String {
         return switch (parseDisplayType(type)) {
             case DTFunction(args, ret):
-                printFunctionSignature(args, ret);
+                printFunctionSignature(args, ret, {argumentTypeHints: true, returnTypeHint: Always});
             case DTValue(type):
                 if (type == null) "" else type;
         }
     }
 
-    public static function printFunctionSignature(args:Array<DisplayFunctionArgument>, ret:Null<String>):String {
+    public static function printFunctionDeclaration(args:Array<DisplayFunctionArgument>, ret:Null<String>, formatting:FunctionFormattingConfig):String {
+        return "function" + printFunctionSignature(args, ret, formatting);
+    }
+
+    public static function printFunctionSignature(args:Array<DisplayFunctionArgument>, ret:Null<String>, formatting:FunctionFormattingConfig):String {
         var result = new StringBuf();
         result.addChar("(".code);
         var first = true;
         for (arg in args) {
             if (first) first = false else result.add(", ");
-            result.add(printFunctionArgument(arg));
+            result.add(printSignatureArgument(arg, formatting.argumentTypeHints));
         }
         result.addChar(")".code);
-        if (ret != null) {
+        if (shouldPrintReturnType(ret, formatting.returnTypeHint)) {
             result.addChar(":".code);
             result.add(ret);
         }
         return result.toString();
     }
 
-    public static function printFunctionArgument(arg:DisplayFunctionArgument):String {
+    private static function shouldPrintReturnType(ret:Null<String>, option:ReturnTypeHintOption):Bool {
+        if (ret == null) return false;
+        return switch (option) {
+            case Always: true;
+            case Never: false;
+            case NonVoid: ret != "Void";
+        }
+    }
+
+    public static function printSignatureArgument(arg:DisplayFunctionArgument, typeHints:Bool):String {
         var result = arg.name;
         if (arg.opt)
             result = "?" + result;
-        if (arg.type != null) {
+        if (arg.type != null && typeHints) {
             result += ":";
             result += arg.type;
         }
         return result;
+    }
+
+    public static function parseFunctionArgumentType(argument:String):DisplayType {
+        if (argument.startsWith("?"))
+            argument = argument.substr(1);
+        
+        var colonIndex = argument.indexOf(":");
+        var argumentType = argument.substr(colonIndex + 1);
+        
+        // urgh...
+        while (argumentType.startsWith("Null<") && argumentType.endsWith(">")) {
+            argumentType = argumentType.substring("Null<".length, argumentType.length - 1);
+        }
+        return parseDisplayType(argumentType);
     }
 
     public static function parseDisplayType(type:String):DisplayType {

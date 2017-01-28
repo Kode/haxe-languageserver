@@ -5,17 +5,24 @@ import jsonrpc.ResponseError;
 import jsonrpc.Types.NoData;
 import languageServerProtocol.Types;
 
+typedef CodeActionContributor = CodeActionParams->Array<Command>;
+
 class CodeActionFeature {
     var context:Context;
-    var diagnostics:DiagnosticsManager;
+    var contributors:Array<CodeActionContributor> = [];
 
-    public function new(context:Context, diagnostics:DiagnosticsManager) {
+    public function new(context:Context) {
         this.context = context;
-        this.diagnostics = diagnostics;
         context.protocol.onRequest(Methods.CodeAction, onCodeAction);
     }
 
+    public function registerContributor(contributor:CodeActionContributor) {
+        contributors.push(contributor);
+    }
+
     function onCodeAction(params:CodeActionParams, token:CancellationToken, resolve:Array<Command>->Void, reject:ResponseError<NoData>->Void) {
-        resolve(diagnostics.getCodeActions(params));
+        var codeActions = [];
+        for (contributor in contributors) codeActions = codeActions.concat(contributor(params));
+        resolve(codeActions);
     }
 }

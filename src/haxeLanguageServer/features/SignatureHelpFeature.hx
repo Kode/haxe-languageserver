@@ -5,10 +5,16 @@ import jsonrpc.ResponseError;
 import jsonrpc.Types.NoData;
 import languageServerProtocol.Types;
 
+typedef CurrentSignature = {
+    var help(default, never):SignatureHelp;
+    var params(default, never):TextDocumentPositionParams; 
+}
+
 class SignatureHelpFeature {
+    public var currentSignature(default, null):CurrentSignature;
     var context:Context;
 
-    public function new(context) {
+    public function new(context:Context) {
         this.context = context;
         context.protocol.onRequest(Methods.SignatureHelp, onSignatureHelp);
     }
@@ -20,7 +26,10 @@ class SignatureHelpFeature {
         context.callDisplay(args, doc.content, token, function(data) {
             if (token.canceled)
                 return;
-            resolve(haxe.Json.parse(data));
+
+            var help:SignatureHelp = haxe.Json.parse(data);
+            resolve(help);
+            currentSignature = {help: help, params: params};
         }, function(error) reject(ResponseError.internalError(error)));
     }
 }

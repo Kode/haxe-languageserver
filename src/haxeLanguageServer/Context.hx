@@ -6,6 +6,7 @@ import jsonrpc.Types;
 import jsonrpc.Protocol;
 import languageServerProtocol.Types;
 import haxeLanguageServer.features.*;
+import haxeLanguageServer.helper.TypeHelper.FunctionFormattingConfig;
 import js.node.Fs;
 import js.node.Path;
 
@@ -22,6 +23,14 @@ private typedef DisplayServerConfig = {
     @:optional var osx:DisplayServerConfigBase;
 }
 
+private typedef FunctionGenerationConfig = {
+    @:optional var anonymous:FunctionFormattingConfig;
+}
+
+private typedef CodeGenerationConfig = {
+    @:optional var functions:FunctionGenerationConfig;
+}
+
 private typedef Config = {
     var displayConfigurations:Array<Array<String>>;
     var enableDiagnostics:Bool;
@@ -30,6 +39,7 @@ private typedef Config = {
     var displayServer:DisplayServerConfig;
     var displayPort:Null<Int>;
     var buildCompletionCache:Bool;
+    var codeGeneration:CodeGenerationConfig;
 }
 
 private typedef InitOptions = {
@@ -49,6 +59,8 @@ class Context {
     public var protocol(default,null):Protocol;
     public var haxeServer(default,null):HaxeServer;
     public var documents(default,null):TextDocuments;
+    public var codeActions(default,null):CodeActionFeature;
+    public var signatureHelp(default,null):SignatureHelpFeature;
     var diagnostics:DiagnosticsManager;
 
     public var config(default, null):Config;
@@ -122,20 +134,23 @@ class Context {
 
         config = newConfig.settings.haxe;
         updateDisplayServerConfig();
+        updateCodeGenerationConfig();
 
         if (firstInit) {
             haxeServer.start(haxePath, function() {
+                codeActions = new CodeActionFeature(this);
+                
                 new CompletionFeature(this);
                 new HoverFeature(this);
-                new SignatureHelpFeature(this);
+                signatureHelp = new SignatureHelpFeature(this);
                 new GotoDefinitionFeature(this);
                 new FindReferencesFeature(this);
                 new DocumentSymbolsFeature(this);
                 new DeterminePackageFeature(this);
 
                 diagnostics = new DiagnosticsManager(this);
-                new CodeActionFeature(this, diagnostics);
                 new CodeLensFeature(this);
+                new CodeGenerationFeature(this);
 
                 if (config.enableDiagnostics) {
                     for (doc in documents.getAll())
@@ -170,6 +185,16 @@ class Context {
             if (sysConf != null)
                 merge(sysConf);
         }
+    }
+
+    function updateCodeGenerationConfig() {
+        var codeGen = config.codeGeneration;
+        if (codeGen.functions == null)
+            codeGen.functions = {};
+
+        var functions = codeGen.functions;
+        if (functions.anonymous == null)
+            functions.anonymous = {argumentTypeHints: false, returnTypeHint: Never};
     }
 
     function onDidOpenTextDocument(event:DidOpenTextDocumentParams) {
