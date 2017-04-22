@@ -1,27 +1,45 @@
 package haxeLanguageServer;
 
+import haxe.Timer;
+import hxParser.ParsingPointManager;
 import js.node.Buffer;
-import languageServerProtocol.Types;
+
+typedef OnTextDocumentChangeListener = TextDocument->Array<TextDocumentContentChangeEvent>->Int->Void;
+
+typedef DocumentParsingInformation = {
+    tree:hxParser.ParseTree.File,
+    parsingPointManager:ParsingPointManager
+}
 
 class TextDocument {
-    public var uri(default,null):String;
-    public var fsPath(default,null):String;
+    public var uri(default,null):DocumentUri;
+    public var fsPath(default,null):FsPath;
     public var languageId(default,null):String;
     public var version(default,null):Int;
     public var content(default,null):String;
+    public var openTimestamp(default,null):Float;
     public var lineCount(get,never):Int;
+    #if false
+    public var parsingInfo(get,never):DocumentParsingInformation;
+    var _parsingInfo:Null<DocumentParsingInformation>;
+    #end
     @:allow(haxeLanguageServer.TextDocuments)
     var lineOffsets:Array<Int>;
+    var onUpdateListeners:Array<OnTextDocumentChangeListener> = [];
 
-    public function new(uri:String, languageId:String, version:Int, content:String) {
+    public function new(uri:DocumentUri, languageId:String, version:Int, content:String) {
         this.uri = uri;
-        this.fsPath = Uri.uriToFsPath(uri);
+        this.fsPath = uri.toFsPath();
         this.languageId = languageId;
         this.version = version;
         this.content = content;
+        this.openTimestamp = Timer.stamp();
     }
 
     public function update(events:Array<TextDocumentContentChangeEvent>, version:Int):Void {
+        for (listener in onUpdateListeners)
+            listener(this, events, version);
+
         this.version = version;
         for (event in events) {
             if (event.range == null || event.rangeLength == null) {
@@ -31,6 +49,11 @@ class TextDocument {
                 var before = content.substring(0, offset);
                 var after = content.substring(offset + event.rangeLength);
                 content = before + event.text + after;
+                #if false
+                #if false // let's be extra safe with this
+                updateParsingInfo(event.range, event.rangeLength, event.text.length);
+                #end
+                #end
             }
         }
         lineOffsets = null;
@@ -112,6 +135,14 @@ class TextDocument {
         return content.substring(byteOffsetAt(range.start), byteOffsetAt(range.end));
     }
 
+    public function addUpdateListener(listener:OnTextDocumentChangeListener) {
+        onUpdateListeners.push(listener);
+    }
+
+    public function removeUpdateListener(listener:OnTextDocumentChangeListener) {
+        onUpdateListeners.remove(listener);
+    }
+
     function getLineOffsets() {
         if (lineOffsets == null) {
             var offsets = [];
@@ -137,4 +168,52 @@ class TextDocument {
     }
 
     inline function get_lineCount() return getLineOffsets().length;
+
+    #if false
+
+    function createParsingInfo() {
+        return switch (hxParser.HxParser.parse(content)) {
+            case Success(tree):
+                var tree = new hxParser.Converter(tree).convertResultToFile();
+                var manager = new ParsingPointManager();
+                manager.walkFile(tree, Root);
+                { tree:tree, parsingPointManager:manager };
+            case Failure(_): null;
+        }
+    }
+
+    function get_parsingInfo() {
+        if (_parsingInfo == null) {
+            _parsingInfo = createParsingInfo();
+        }
+        return _parsingInfo;
+    }
+
+    function updateParsingInfo(range:Range, rangeLength:Int, textLength:Int) {
+        if (_parsingInfo == null) {
+            _parsingInfo = createParsingInfo();
+        } else {
+            // TODO: We might want to catch exceptions in this section, else we risk that the parse tree
+            // gets "stuck" if something fails.
+            var offsetBegin = offsetAt(range.start);
+            var offsetEnd = offsetAt(range.end);
+            var node = parsingInfo.parsingPointManager.findEnclosing(offsetBegin, offsetEnd);
+            if (node != null) {
+                var offsetBegin = node.start;
+                var offsetEnd = node.end - rangeLength + textLength;
+                var sectionContent = content.substring(offsetBegin, offsetEnd);
+                switch (hxParser.HxParser.parse(sectionContent, node.name)) {
+                    case Success(tree):
+                        node.callback(tree);
+                        parsingInfo.parsingPointManager.reset();
+                        parsingInfo.parsingPointManager.walkFile(parsingInfo.tree, Root);
+                    case Failure(s):
+                        _parsingInfo = null;
+                }
+            } else {
+                _parsingInfo = null;
+            }
+        }
+    }
+    #end
 }

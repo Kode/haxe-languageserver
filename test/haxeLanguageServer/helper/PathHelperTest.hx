@@ -1,9 +1,8 @@
 package haxeLanguageServer.helper;
 
-import haxe.unit.TestCase;
 import haxe.PosInfos;
 
-class PathHelperTest extends TestCase {
+class PathHelperTest extends TestCaseBase {
     public function testMatches() {
         function matches(filter:TestFilter, path:TestPath):Bool {
             var pathFilter = PathHelper.preparePathFilter(
@@ -39,7 +38,7 @@ class PathHelperTest extends TestCase {
 
     public function testNormalize() {
         function test(expected:String, path:String, ?pos:PosInfos) {
-            assertEquals(expected, PathHelper.normalize(path), pos);
+            assertEquals(expected, PathHelper.normalize(new FsPath(path)).toString(), pos);
         }
 
         test("c:/HaxeToolkit/haxe", "C:\\HaxeToolkit\\haxe");
@@ -70,4 +69,6 @@ class PathHelperTest extends TestCase {
     var Hscript = HaxelibPath + "/hscript/2,0,7/hscript/";
 
     var LinuxPath = "~/../../../lib/";
+
+    @:to function toFsPath():FsPath return new FsPath(this);
 }

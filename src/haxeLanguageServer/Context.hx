@@ -1,12 +1,15 @@
 package haxeLanguageServer;
 
+import haxe.Timer;
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types;
 import jsonrpc.Protocol;
-import languageServerProtocol.Types;
 import haxeLanguageServer.features.*;
 import haxeLanguageServer.helper.TypeHelper.FunctionFormattingConfig;
+import haxeLanguageServer.features.CodeActionFeature.CodeActionContributor;
+import haxeLanguageServer.HaxeServer.DisplayResult;
+
 import js.node.Fs;
 import js.node.Path;
 
@@ -40,6 +43,7 @@ private typedef Config = {
     var displayPort:Null<Int>;
     var buildCompletionCache:Bool;
     var codeGeneration:CodeGenerationConfig;
+    var format:haxeFormatter.Config;
 }
 
 private typedef InitOptions = {
@@ -53,17 +57,17 @@ class Context {
         default: "linux";
     };
 
-    public var workspacePath(default,null):String;
+    public var workspacePath(default,null):FsPath;
     public var haxePath(default,null):String;
     public var displayArguments(get,never):Array<String>;
     public var protocol(default,null):Protocol;
     public var haxeServer(default,null):HaxeServer;
     public var documents(default,null):TextDocuments;
-    public var codeActions(default,null):CodeActionFeature;
     public var signatureHelp(default,null):SignatureHelpFeature;
     var diagnostics:DiagnosticsManager;
+    var codeActions:CodeActionFeature;
 
-    public var config(default, null):Config;
+    public var config(default,null):Config;
     @:allow(haxeLanguageServer.HaxeServer)
     var displayServerConfig:DisplayServerConfigBase;
     var displayConfigurationIndex:Int;
@@ -81,6 +85,7 @@ class Context {
         protocol.onNotification(Methods.DidOpenTextDocument, onDidOpenTextDocument);
         protocol.onNotification(Methods.DidSaveTextDocument, onDidSaveTextDocument);
         protocol.onNotification(VshaxeMethods.DidChangeDisplayConfigurationIndex, onDidChangeDisplayConfigurationIndex);
+        protocol.onNotification(VshaxeMethods.DidChangeActiveTextEditor, onDidChangeActiveTextEditor);
     }
 
     public inline function sendShowMessage(type:MessageType, message:String) {
@@ -92,7 +97,7 @@ class Context {
     }
 
     function onInitialize(params:InitializeParams, token:CancellationToken, resolve:InitializeResult->Void, reject:ResponseError<InitializeError>->Void) {
-        workspacePath = params.rootPath;
+        workspacePath = new FsPath(params.rootPath);
         haxePath = findHaxe(params.initializationOptions.kha);
         displayConfigurationIndex = (params.initializationOptions : InitOptions).displayConfigurationIndex;
         documents = new TextDocuments(protocol);
@@ -111,6 +116,9 @@ class Context {
                 documentSymbolProvider: true,
                 workspaceSymbolProvider: true,
                 codeActionProvider: true,
+                #if debug
+                documentFormattingProvider: true,
+                #end
                 codeLensProvider: {
                     resolveProvider: true
                 }
@@ -139,7 +147,7 @@ class Context {
         if (firstInit) {
             haxeServer.start(haxePath, function() {
                 codeActions = new CodeActionFeature(this);
-                
+
                 new CompletionFeature(this);
                 new HoverFeature(this);
                 signatureHelp = new SignatureHelpFeature(this);
@@ -152,10 +160,12 @@ class Context {
                 new CodeLensFeature(this);
                 new CodeGenerationFeature(this);
 
-                if (config.enableDiagnostics) {
-                    for (doc in documents.getAll())
-                        diagnostics.publishDiagnostics(doc.uri);
-                }
+                #if debug
+                new DocumentFormattingFeature(this);
+                #end
+
+                for (doc in documents.getAll())
+                    publishDiagnostics(doc.uri);
             });
         } else {
             haxeServer.restart("configuration was changed");
@@ -199,18 +209,32 @@ class Context {
 
     function onDidOpenTextDocument(event:DidOpenTextDocumentParams) {
         documents.onDidOpenTextDocument(event);
-        if (diagnostics != null && config.enableDiagnostics)
-            diagnostics.publishDiagnostics(event.textDocument.uri);
+        publishDiagnostics(event.textDocument.uri);
     }
 
     function onDidSaveTextDocument(event:DidSaveTextDocumentParams) {
-        if (diagnostics != null && config.enableDiagnostics)
-            diagnostics.publishDiagnostics(event.textDocument.uri);
+        publishDiagnostics(event.textDocument.uri);
     }
 
-    public function callDisplay(args:Array<String>, stdin:String, token:CancellationToken, callback:String->Void, errback:String->Void) {
-        var actualArgs = ["--cwd", workspacePath + "/build"]; // change cwd to workspace root
-        actualArgs = actualArgs.concat(displayArguments); // add arguments from the workspace settings
+    function onDidChangeActiveTextEditor(params:{uri:DocumentUri}) {
+        var document = documents.get(params.uri);
+        if (document == null)
+            return;
+        // avoid running diagnostics twice when the document is initially opened (open + activate event)
+        var timeSinceOpened = Timer.stamp() - document.openTimestamp;
+        if (timeSinceOpened > 0.1)
+            publishDiagnostics(params.uri);
+    }
+
+    function publishDiagnostics(uri:DocumentUri) {
+        if (diagnostics != null && config.enableDiagnostics)
+            diagnostics.publishDiagnostics(uri);
+    }
+
+    public function callDisplay(args:Array<String>, stdin:String, token:CancellationToken, callback:DisplayResult->Void, errback:String->Void) {
+        var actualArgs = ["--cwd", workspacePath.toString() + "/build"]; // change cwd to workspace root
+        if (displayArguments != null)
+            actualArgs = actualArgs.concat(displayArguments); // add arguments from the workspace settings
         actualArgs = actualArgs.concat([
             "-D", "display-details", // get more details in completion results,
             "--no-output", // prevent anygeneration
@@ -218,7 +242,11 @@ class Context {
         actualArgs = actualArgs.concat(args); // finally, add given query args
         haxeServer.process(actualArgs, token, stdin, callback, errback);
     }
-    
+
+    public function registerCodeActionContributor(contributor:CodeActionContributor) {
+        codeActions.registerContributor(contributor);
+    }
+
     static function findHaxe(kha:String):String {
         var executableExtension:String;
         if (js.Node.process.platform == "win32") {

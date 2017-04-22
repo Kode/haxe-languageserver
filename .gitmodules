@@ -1,3 +1,6 @@
 [submodule "protocol"]
 	path = protocol
 	url = ../language-server-protocol-haxe
+[submodule "haxe-formatter"]
+	path = formatter
+	url = ../haxe-formatter

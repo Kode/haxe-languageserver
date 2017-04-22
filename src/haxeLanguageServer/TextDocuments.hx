@@ -1,13 +1,15 @@
 package haxeLanguageServer;
 
-import languageServerProtocol.Types;
+import jsonrpc.Protocol;
 
 class TextDocuments {
     public static inline var syncKind = TextDocumentSyncKind.Incremental;
 
-    var documents:Map<String,TextDocument>;
+    var protocol:Protocol;
+    var documents:Map<DocumentUri,TextDocument>;
 
-    public function new(protocol:jsonrpc.Protocol) {
+    public function new(protocol:Protocol) {
+        this.protocol = protocol;
         documents = new Map();
         protocol.onNotification(Methods.DidChangeTextDocument, onDidChangeTextDocument);
         protocol.onNotification(Methods.DidCloseTextDocument, onDidCloseTextDocument);
@@ -17,7 +19,7 @@ class TextDocuments {
         return documents.iterator();
     }
 
-    public inline function get(uri:String):TextDocument {
+    public inline function get(uri:DocumentUri):TextDocument {
         return documents[uri];
     }
 
@@ -33,8 +35,12 @@ class TextDocuments {
         if (changes.length == 0)
             return;
         var document = documents[td.uri];
-        if (document != null)
+        if (document != null) {
             document.update(changes, td.version);
+            #if false
+            protocol.sendNotification(VshaxeMethods.UpdateParseTree, {uri: td.uri.toString(), parseTree: haxe.Serializer.run(document.parsingInfo.tree)});
+            #end
+        }
     }
 
     function onDidCloseTextDocument(event:DidCloseTextDocumentParams) {

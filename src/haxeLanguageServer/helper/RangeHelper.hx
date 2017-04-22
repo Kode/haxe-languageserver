@@ -1,8 +1,6 @@
 package haxeLanguageServer.helper;
 
-import languageServerProtocol.Types;
-
-/** 
+/**
  * Extends `languageServerProtocol.Types.Range` with the
  * same utility methods that `vscode.Range` provides
  * (`vscode\src\vs\workbench\api\node\extHostTypes.ts`).
@@ -98,10 +96,14 @@ class RangeHelper {
     public static function with(range:Range, ?start:Position, ?end:Position):Range {
         var start = if (start == null) range.start else start;
         var end = if (end == null) range.end else end;
-        
+
         if (start.isEqual(range.start) && end.isEqual(range.end)) {
             return range;
         }
         return {start: start, end: end};
+    }
+
+    public static function isEqual(range:Range, other:Range):Bool {
+        return range.start.isEqual(other.start) && range.end.isEqual(other.end);
     }
 }

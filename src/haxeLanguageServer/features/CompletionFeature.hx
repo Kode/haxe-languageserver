@@ -3,10 +3,10 @@ package haxeLanguageServer.features;
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types.NoData;
-import languageServerProtocol.Types;
 import haxeLanguageServer.helper.DocHelper;
 import haxeLanguageServer.helper.TypeHelper.prepareSignature;
-import String as Str;
+import haxeLanguageServer.helper.TypeHelper.parseDisplayType;
+import String.fromCharCode;
 
 class CompletionFeature {
     var context:Context;
@@ -23,36 +23,33 @@ class CompletionFeature {
         var r = calculateCompletionPosition(textBefore, offset);
         var bytePos = doc.offsetToByteOffset(r.pos);
         var args = ["--display", '${doc.fsPath}@$bytePos' + (if (r.toplevel) "@toplevel" else "")];
-        context.callDisplay(args, doc.content, token, function(data) {
-            if (token.canceled)
-                return;
+        context.callDisplay(args, doc.content, token, function(result) {
+            switch (result) {
+                case DCancelled:
+                    resolve(null);
+                case DResult(data):
+                    var xml = try Xml.parse(data).firstElement() catch (_:Any) null;
+                    if (xml == null) return reject(ResponseError.internalError("Invalid xml data: " + data));
 
-            var xml = try Xml.parse(data).firstElement() catch (_:Any) null;
-            if (xml == null) return reject(ResponseError.internalError("Invalid xml data: " + data));
-
-            var items = if (r.toplevel) parseToplevelCompletion(xml) else parseFieldCompletion(xml, textBefore);
-            resolve(items);
+                    var items = if (r.toplevel) parseToplevelCompletion(xml) else parseFieldCompletion(xml, textBefore);
+                    resolve(items);
+            }
         }, function(error) reject(ResponseError.internalError(error)));
     }
 
     static var reFieldPart = ~/(\.|@(:?))(\w*)$/;
-    static var reStructPart = ~/[(,]\s*{(\s*(\s*\w+\s*:\s*["'\w()\.]+\s*,\s*)*\w*)$/;
     static function calculateCompletionPosition(text:String, index:Int):CompletionPosition {
         if (reFieldPart.match(text))
             return {
                 pos: index - reFieldPart.matched(3).length,
                 toplevel: false,
             };
-        else if (reStructPart.match(text))
-            return {
-                pos: index - reStructPart.matched(1).length,
-                toplevel: false,
-            };
-        else
-            return {
-                pos: index,
-                toplevel: true,
-            };
+
+        var whitespaceAmount = text.length - text.rtrim().length;
+        return {
+            pos: index - whitespaceAmount,
+            toplevel: true,
+        };
     }
 
     static function parseToplevelCompletion(x:Xml):Array<CompletionItem> {
@@ -65,7 +62,7 @@ class CompletionFeature {
 
             var item:CompletionItem = {label: name};
 
-            var displayKind = toplevelKindToCompletionItemKind(kind);
+            var displayKind = toplevelKindToCompletionItemKind(kind, type);
             if (displayKind != null) item.kind = displayKind;
 
             if (isTimerDebugFieldCompletion(name)) {
@@ -99,11 +96,12 @@ class CompletionFeature {
         return result.concat(timers);
     }
 
-    static function toplevelKindToCompletionItemKind(kind:String):CompletionItemKind {
+    static function toplevelKindToCompletionItemKind(kind:String, type:String):CompletionItemKind {
+        function isFunction()
+            return type != null && parseDisplayType(type).match(DTFunction(_));
+
         return switch (kind) {
-            case "local": Variable;
-            case "member": Field;
-            case "static": Class;
+            case "local" | "member" | "static": if (isFunction()) Method else Field;
             case "enum" | "enumabstract": Enum;
             case "global": Variable;
             case "type": Class;
@@ -160,7 +158,7 @@ class CompletionFeature {
         });
 
         for (i in 0...items.length) {
-            items[i].sortText = "_" + Str.fromCharCode(65 + i);
+            items[i].sortText = "_" + fromCharCode(65 + i);
         }
     }
 
@@ -174,7 +172,7 @@ class CompletionFeature {
             seconds = Std.parseFloat(timeRegex.matched(1));
             percentage = timeRegex.matched(2);
         } catch (e:Dynamic) {}
-        
+
         var doc = null;
         if (name.startsWith("@TIME @TOTAL")) {
             name = "@Total time: " + time;

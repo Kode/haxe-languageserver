@@ -3,7 +3,7 @@ package haxeLanguageServer.features;
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types.NoData;
-import languageServerProtocol.Types;
+import haxeLanguageServer.HaxeServer.DisplayResult;
 
 class CodeLensFeature {
     var context:Context;
@@ -13,7 +13,7 @@ class CodeLensFeature {
         context.protocol.onRequest(Methods.CodeLens, onCodeLens);
     }
 
-    function getCodeLensFromStatistics(uri:String, statistics:Array<StatisticsObject>) {
+    function getCodeLensFromStatistics(uri:DocumentUri, statistics:Array<StatisticsObject>) {
         var actions:Array<CodeLens> = [];
         function addRelation(kind:String, plural:String, range:Range, relations:Null<Array<Relation>>) {
             if (relations == null) {
@@ -40,7 +40,7 @@ class CodeLensFeature {
                             var nextLineStart = { character: 0, line: c.range.start.line + 1 };
                             cRange = { start: c.range.start, end: nextLineStart };
                         }
-                        return { range: cRange, uri: Uri.fsPathToUri(c.file) }
+                        return { range: cRange, uri: c.file.toUri() }
                     })
                 ];
                 {
@@ -78,28 +78,33 @@ class CodeLensFeature {
         return actions;
     }
 
-    function onCodeLens(params:CodeLensParams, token:CancellationToken, resolve:Array<CodeLens> -> Void, reject:ResponseError<NoData>->Void) {
+    function onCodeLens(params:CodeLensParams, token:CancellationToken, resolve:Array<CodeLens>->Void, reject:ResponseError<NoData>->Void) {
         if (!context.config.enableCodeLens)
             return resolve([]);
 
         var doc = context.documents.get(params.textDocument.uri);
         function processError(error:String) {
-            context.sendLogMessage(Log, error);
+            reject(jsonrpc.ResponseError.internalError(error));
         }
-        function processStatisticsReply(s:String) {
-            var data:Array<Statistics> =
-                try
-                    haxe.Json.parse(s)
-                catch (e:Any)
-                    return reject(ResponseError.internalError("Error parsing stats response: " + Std.string(e)));
-            for (statistics in data) {
-                var uri = Uri.fsPathToUri(statistics.file);
-                if (uri == params.textDocument.uri) {
-                    resolve(getCodeLensFromStatistics(uri, statistics.statistics));
-                }
+        function processStatisticsReply(r:DisplayResult) {
+            switch (r) {
+                case DCancelled:
+                    resolve(null);
+                case DResult(s):
+                    var data:Array<Statistics> =
+                        try
+                            haxe.Json.parse(s)
+                        catch (e:Any)
+                            return reject(ResponseError.internalError("Error parsing stats response: " + Std.string(e)));
+                    for (statistics in data) {
+                        var uri = statistics.file.toUri();
+                        if (uri == params.textDocument.uri) {
+                            return resolve(getCodeLensFromStatistics(uri, statistics.statistics));
+                        }
+                    }
             }
         }
-        context.callDisplay(["--display", doc.fsPath + "@0@statistics"], doc.content, null, processStatisticsReply, processError);
+        context.callDisplay(["--display", doc.fsPath + "@0@statistics"], doc.content, token, processStatisticsReply, processError);
     }
 }
 
@@ -112,7 +117,7 @@ class CodeLensFeature {
 }
 
 private typedef Relation = {
-    var file:String;
+    var file:FsPath;
     var range:Range;
 }
 
@@ -126,6 +131,6 @@ private typedef StatisticsObject = {
 }
 
 private typedef Statistics = {
-    var file:String;
+    var file:FsPath;
     var statistics:Array<StatisticsObject>;
 }

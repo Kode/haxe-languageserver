@@ -1,5 +1,6 @@
 package haxeLanguageServer;
 
+import haxe.io.Path;
 import js.node.net.Socket;
 import js.node.child_process.ChildProcess as ChildProcessObject;
 import js.node.child_process.ChildProcess.ChildProcessEvent;
@@ -9,6 +10,11 @@ import js.node.Path;
 import js.node.stream.Readable;
 import jsonrpc.CancellationToken;
 
+enum DisplayResult {
+    DCancelled;
+    DResult(msg:String);
+}
+
 private class DisplayRequest {
     // these are used for the queue
     public var prev:DisplayRequest;
@@ -17,13 +23,13 @@ private class DisplayRequest {
     var token:CancellationToken;
     var args:Array<String>;
     var stdin:String;
-    var callback:String->Void;
+    var callback:DisplayResult->Void;
     var errback:String->Void;
     public var socket:Null<Socket>;
 
     static var stdinSepBuf = new Buffer([1]);
 
-    public function new(token:CancellationToken, args:Array<String>, stdin:String, callback:String->Void, errback:String->Void, socket) {
+    public function new(token:CancellationToken, args:Array<String>, stdin:String, callback:DisplayResult->Void, errback:String->Void, socket) {
         this.token = token;
         this.args = args;
         this.stdin = stdin;
@@ -59,9 +65,13 @@ private class DisplayRequest {
         return Buffer.concat(chunks, length + 4);
     }
 
+    public inline function cancel() {
+        callback(DCancelled);
+    }
+
     public function processResult(data:String) {
-        if (data == null || (token != null && token.canceled))
-            return callback(null);
+        if (token != null && token.canceled)
+            return callback(DCancelled);
 
         var buf = new StringBuf();
         var hasError = false;
@@ -85,10 +95,10 @@ private class DisplayRequest {
         var data = buf.toString().trim();
 
         if (hasError)
-            return errback("Error from Haxe server: " + data);
+            return errback(data);
 
         try {
-            callback(data);
+            callback(DResult(data));
         } catch (e:Any) {
             errback(jsonrpc.ErrorUtils.errorToString(e, "Exception while handling Haxe completion response: "));
         }
@@ -108,6 +118,8 @@ class HaxeServer {
     var currentRequest:DisplayRequest;
     var socketListener:js.node.net.Server;
 
+    var crashes:Int = 0;
+
     public function new(context:Context) {
         this.context = context;
     }
@@ -126,9 +138,17 @@ class HaxeServer {
             env[key] = context.displayServerConfig.env[key];
         env["HAXE_STD_PATH"] = Path.normalize(Path.join(haxePath, "..", "std"));
 
+        //var haxePath = context.displayServerConfig.haxePath;
         var checkRun = ChildProcess.spawnSync(haxePath, ["-version"], {env: env});
-        if (checkRun.error != null)
+        if (checkRun.error != null) {
+            if (checkRun.error.message.indexOf("ENOENT") >= 0) {
+                if (Path.isAbsolute(haxePath))
+                    return error('Path to Haxe executable is not valid: \'$haxePath\'. Please check your settings.');
+                else if (haxePath == "haxe") // default
+                    return error("Could not find Haxe in PATH. Is it installed?");
+            }
             return error('Error starting Haxe server: ${checkRun.error}');
+        }
 
         var output = (checkRun.stderr : Buffer).toString().trim();
 
@@ -141,7 +161,8 @@ class HaxeServer {
         var major = Std.parseInt(reVersion.matched(1));
         var minor = Std.parseInt(reVersion.matched(2));
         var patch = Std.parseInt(reVersion.matched(3));
-        if (major < 3 || minor < 4)
+        var isVersionSupported = (major == 3 && minor >= 4) || major >= 4;
+        if (!isVersionSupported)
             return error("Unsupported Haxe version! Minimum version required: 3.4.0");
 
         buffer = new MessageBuffer();
@@ -156,7 +177,7 @@ class HaxeServer {
 
         proc.on(ChildProcessEvent.Exit, onExit);
 
-        if (context.config.buildCompletionCache) {
+        if (context.config.buildCompletionCache && context.displayArguments != null) {
             trace("Initializing completion cache...");
             process(context.displayArguments.concat(["--no-output"]), null, null, function(_) {
                 trace("Done.");
@@ -187,7 +208,13 @@ class HaxeServer {
                     socket.destroy();
                     trace("Client disconnected");
                 }
-                process(split, null, null, send, send, socket);
+                function processDisplayResult(d:DisplayResult) {
+                    send(switch (d) {
+                        case DResult(r): r;
+                        case DCancelled: "";
+                    });
+                }
+                process(split, null, null, processDisplayResult, send, socket);
             });
             socket.on('error', function(err) {
                  trace("Socket error: " + err);
@@ -211,7 +238,7 @@ class HaxeServer {
         // cancel all callbacks
         var request = requestsHead;
         while (request != null) {
-            request.processResult(null);
+            request.cancel();
             request = request.next;
         }
 
@@ -224,7 +251,26 @@ class HaxeServer {
     }
 
     function onExit(_, _) {
-        restart("Haxe process was killed");
+        crashes++;
+        if (crashes < 3) {
+            restart("Haxe process was killed");
+            return;
+        }
+
+        var haxeResponse = buffer.getContent();
+
+        // invalid compiler argument?
+        var invalidOptionRegex = ~/unknown option `(.*?)'./;
+        if (invalidOptionRegex.match(haxeResponse)) {
+            var option = invalidOptionRegex.matched(1);
+            context.sendShowMessage(Error, 'Invalid compiler argument \'$option\' detected. '
+                + 'Please verify "haxe.displayConfigurations" and "haxe.displayServer.arguments".');
+            return;
+        }
+
+        context.sendShowMessage(Error, "Haxe process has crashed 3 times, not attempting any more restarts. Please check the output channel for the full error.");
+        trace("\nError message from the compiler:\n");
+        trace(haxeResponse);
     }
 
     function onData(data:Buffer) {
@@ -249,7 +295,7 @@ class HaxeServer {
         }
     }
 
-    public function process(args:Array<String>, token:CancellationToken, stdin:String, callback:String->Void, errback:String->Void, socket:Socket = null) {
+    public function process(args:Array<String>, token:CancellationToken, stdin:String, callback:DisplayResult->Void, errback:String->Void, socket:Socket = null) {
         // create a request object
         var request = new DisplayRequest(token, args, stdin, callback, errback, socket);
 
@@ -268,6 +314,9 @@ class HaxeServer {
                     request.prev.next = request.next;
                 if (request.next != null)
                     request.next.prev = request.prev;
+
+                // notify about the cancellation
+                request.cancel();
             });
         }
 
@@ -342,5 +391,9 @@ private class MessageBuffer {
         buffer.copy(buffer, 0, nextStart);
         index -= nextStart;
         return result;
+    }
+
+    public function getContent():String {
+        return buffer.toString("utf-8", 0, index);
     }
 }

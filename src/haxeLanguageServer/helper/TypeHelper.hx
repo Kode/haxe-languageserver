@@ -1,5 +1,7 @@
 package haxeLanguageServer.helper;
 
+import String.fromCharCode;
+
 typedef FunctionFormattingConfig = {
     var argumentTypeHints:Bool;
     var returnTypeHint:ReturnTypeHintOption;
@@ -79,15 +81,27 @@ class TypeHelper {
     public static function parseFunctionArgumentType(argument:String):DisplayType {
         if (argument.startsWith("?"))
             argument = argument.substr(1);
-        
+
         var colonIndex = argument.indexOf(":");
         var argumentType = argument.substr(colonIndex + 1);
-        
-        // urgh...
-        while (argumentType.startsWith("Null<") && argumentType.endsWith(">")) {
-            argumentType = argumentType.substring("Null<".length, argumentType.length - 1);
+
+        return parseDisplayType(unwrapNullable(argumentType));
+    }
+
+    public static function unwrapNullable(type:String):String {
+        if (type == null) return null;
+        while (type.startsWith("Null<") && type.endsWith(">")) {
+            type = type.substring("Null<".length, type.length - 1);
         }
-        return parseDisplayType(argumentType);
+        return type;
+    }
+
+    public static function getTypeWithoutParams(type:String):String {
+        if (type == null) return null;
+        var index = type.indexOf("<");
+        if (index >= 0)
+            return type.substring(0, index);
+        return type;
     }
 
     public static function parseDisplayType(type:String):DisplayType {
@@ -96,7 +110,7 @@ class TypeHelper {
 
         // prepare a simple toplevel signature without nested arrows
         // nested arrow can be in () or <> and we don't need to modify them,
-        // so we store them separately in `groups` map and replace their occurence
+        // so we store them separately in `groups` map and replace their occurrence
         // with a group name in the toplevel string
         var toplevel = new StringBuf();
         var groups = new Map();
@@ -126,7 +140,7 @@ class TypeHelper {
                 groups[groupId].add(char);
         }
 
-        // process a sigle type entry, replacing inner content from groups
+        // process a single type entry, replacing inner content from groups
         // and removing unnecessary parentheses
         function processType(type:String):String {
             type = groupRegex.map(type, function(r) {
@@ -167,7 +181,7 @@ class TypeHelper {
                     }
                     type = argNameRegex.matchedRight();
                 } else {
-                    name = String.fromCharCode(argNameCode + i);
+                    name = fromCharCode(argNameCode + i);
                     type = part;
                     if (type.charCodeAt(0) == "?".code) {
                         type = type.substring(1);

@@ -1,7 +1,5 @@
 package haxeLanguageServer.helper;
 
-import languageServerProtocol.Types;
-
 class PositionStatics {
     public static function Min(pos1:Position, pos2:Position) {
         return if (pos1.isBefore(pos2)) pos1 else pos2;
@@ -12,7 +10,7 @@ class PositionStatics {
     }
 }
 
-/** 
+/**
  * Extends `languageServerProtocol.Types.Position` with the
  * same utility methods that `vscode.Position` provides
  * (`vscode\src\vs\workbench\api\node\extHostTypes.ts`).

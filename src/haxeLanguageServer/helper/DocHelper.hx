@@ -1,18 +1,16 @@
 package haxeLanguageServer.helper;
 
-using StringTools;
-
 class DocHelper {
     /** Stolen from dox **/
     public static function trim(doc:String) {
         if (doc == null)
             return '';
 
-        // trim leading asterixes
+        // trim leading asterisks
         while (doc.charAt(0) == '*')
             doc = doc.substr(1);
 
-        // trim trailing asterixes
+        // trim trailing asterisks
         while (doc.charAt(doc.length - 1) == '*')
             doc = doc.substr(0, doc.length - 1);
 
@@ -26,7 +24,7 @@ class DocHelper {
         if (matched) {
             var string = ereg.matched(1);
 
-            // escape asterix and allow one optional space after it
+            // escape asterisk and allow one optional space after it
             string = string.split('* ').join('\\* ?');
 
             var indent = new EReg("^" + string, "gm");
@@ -54,7 +52,7 @@ class DocHelper {
         var result = docInfos.doc;
         var hasParams = docInfos.params.length > 0;
         var hasReturn = docInfos.returns != null;
-        
+
         if (docInfos.deprecated != null)
             result += "\n**Deprecated:** " + docInfos.deprecated.doc + "\n";
 
@@ -67,7 +65,7 @@ class DocHelper {
 
         if (docInfos.throws.length > 0)
             result += tableHeader("Exception", "Description") + mapDocTags(docInfos.throws);
-        
+
         if (docInfos.sees.length > 0)
             result += "\nSee also:\n" + docInfos.sees.map(function(p) return "* " + p.doc).join("\n") + "\n";
 

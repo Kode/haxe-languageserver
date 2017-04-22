@@ -1,10 +1,11 @@
 language: haxe
 sudo: false
+dist: trusty
 haxe:
  - development
 
 install:
- - haxelib install hxnodejs
+ - haxelib git vshaxe-build https://github.com/vshaxe/vshaxe-build
 
 script:
- - haxe build.hxml
+ - haxelib run vshaxe-build -t language-server -t language-server-tests -m both

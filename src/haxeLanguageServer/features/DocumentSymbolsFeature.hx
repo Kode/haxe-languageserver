@@ -3,7 +3,6 @@ package haxeLanguageServer.features;
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types.NoData;
-import languageServerProtocol.Types;
 
 @:enum
 private abstract ModuleSymbolKind(Int) {
@@ -28,7 +27,7 @@ private typedef ModuleSymbolEntry = {
 }
 
 private typedef SymbolReply = {
-    var file:String;
+    var file:FsPath;
     var symbols:Array<ModuleSymbolEntry>;
 }
 
@@ -51,7 +50,7 @@ class DocumentSymbolsFeature {
 
         var result = [];
         for (file in data) {
-            var uri = Uri.fsPathToUri(HaxePosition.getProperFileNameCase(file.file));
+            var uri = HaxePosition.getProperFileNameCase(file.file).toUri();
             for (symbol in file.symbols) {
                 if (symbol.range == null) {
                     context.sendShowMessage(Error, "Unknown location for " + haxe.Json.stringify(symbol));
@@ -64,11 +63,14 @@ class DocumentSymbolsFeature {
     }
 
     function makeRequest(args:Array<String>, doc:Null<TextDocument>, token:CancellationToken, resolve:Array<SymbolInformation>->Void, reject:ResponseError<NoData>->Void) {
-        context.callDisplay(args, doc == null ? null : doc.content, token, function(data) {
-            if (token.canceled)
-                return;
-            var result = processSymbolsReply(data, reject);
-            resolve(result);
+        context.callDisplay(args, doc == null ? null : doc.content, token, function(r) {
+            switch (r) {
+                case DCancelled:
+                    resolve(null);
+                case DResult(data):
+                    var result = processSymbolsReply(data, reject);
+                    resolve(result);
+            }
         }, function(error) reject(ResponseError.internalError(error)));
     }
 
@@ -83,7 +85,7 @@ class DocumentSymbolsFeature {
         makeRequest(args, null, token, resolve, reject);
     }
 
-    function moduleSymbolEntryToSymbolInformation(entry:ModuleSymbolEntry, uri:String):SymbolInformation {
+    function moduleSymbolEntryToSymbolInformation(entry:ModuleSymbolEntry, uri:DocumentUri):SymbolInformation {
         var result:SymbolInformation = {
             name: entry.name,
             kind: switch (entry.kind) {
