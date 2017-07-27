@@ -1,10 +1,11 @@
 package haxeLanguageServer.helper;
 
 import String.fromCharCode;
+import haxeLanguageServer.helper.TypeHelper.DisplayFunctionArgument;
 
 class ArgumentNameHelper {
-    public static function guessArgumentNames(types:Array<String>):Array<String> {
-        return avoidDuplicates([for (type in types) guessArgumentName(type)]);
+    public static function guessArgumentNames(args:Array<DisplayFunctionArgument>):Array<String> {
+        return avoidDuplicates([for (arg in args) if (arg.name != null) arg.name else guessArgumentName(arg.type)]);
     }
 
     public static function guessArgumentName(type:String):String {
@@ -53,8 +54,14 @@ class ArgumentNameHelper {
             return [for (i in 0...alphabets) fromCharCode(lowerAsciiA + (index % letters))].join("");
         }
 
+        var isOptional = false;
+        if (type.startsWith("?")) {
+            isOptional = true;
+            type = type.substr(1);
+        }
+
         if (type.startsWith(":"))
-             return getUniqueLetter(index) + type;
+             return (if (isOptional) "?" else "") + getUniqueLetter(index) + type;
         else if (type.startsWith("(")) {
             var segmentsRe = ~/\((.*?)\)\s*:\s*(.*)/;
             if (!segmentsRe.match(type))

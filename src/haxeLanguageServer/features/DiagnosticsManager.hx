@@ -20,7 +20,14 @@ class DiagnosticsManager {
     }
 
     function onRunGlobalDiagnostics(_) {
-        context.callDisplay(["--display", "diagnostics"], null, null, processDiagnosticsReply.bind(null), processErrorReply.bind(null));
+        var stopProgress = context.startProgress("Collecting Diagnostics");
+        context.callDisplay(["--display", "diagnostics"], null, null, function(result) {
+            processDiagnosticsReply(null, result);
+            stopProgress();
+        }, function(error) {
+            processErrorReply(null, error);
+            stopProgress();
+        });
     }
 
     function processErrorReply(uri:Null<DocumentUri>, error:String) {
@@ -53,9 +60,16 @@ class DiagnosticsManager {
         var column = getInt(4);
         var endColumn = getInt(5);
 
+        function makePosition(line:Int, character:Int) {
+            return {
+                line: line - 1,
+                character: context.displayOffsetConverter.positionCharToZeroBasedColumn(character)
+            }
+        }
+
         if (endLine == null) endLine = line;
-        var position = {line: line - 1, character: column};
-        var endPosition = {line: endLine - 1, character: endColumn};
+        var position = makePosition(line, column);
+        var endPosition = makePosition(endLine, endColumn);
 
         var argumentsMap = diagnosticsArguments[uri] = new DiagnosticsMap();
         var diag = {
@@ -126,7 +140,7 @@ class DiagnosticsManager {
         return !PathHelper.matches(path, pathFilter);
     }
 
-    inline function clearDiagnostics(uri:DocumentUri) {
+    public function clearDiagnostics(uri:DocumentUri) {
         if (diagnosticsArguments.remove(uri))
             context.protocol.sendNotification(Methods.PublishDiagnostics, {uri: uri, diagnostics: []});
     }
@@ -137,7 +151,9 @@ class DiagnosticsManager {
             return;
         }
         var doc = context.documents.get(uri);
-        context.callDisplay(["--display", doc.fsPath + "@0@diagnostics"], null, null, processDiagnosticsReply.bind(uri), processErrorReply.bind(uri));
+        if (doc != null) {
+            context.callDisplay(["--display", doc.fsPath + "@0@diagnostics"], null, null, processDiagnosticsReply.bind(uri), processErrorReply.bind(uri));
+        }
     }
 
     static var reEndsWithWhitespace = ~/\s*$/;

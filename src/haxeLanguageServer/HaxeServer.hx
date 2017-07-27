@@ -9,6 +9,7 @@ import js.node.ChildProcess;
 import js.node.Path;
 import js.node.stream.Readable;
 import jsonrpc.CancellationToken;
+import haxeLanguageServer.helper.SemVer;
 
 enum DisplayResult {
     DCancelled;
@@ -107,7 +108,6 @@ private class DisplayRequest {
 
 class HaxeServer {
     var proc:ChildProcessObject;
-    static var reVersion = ~/^(\d+)\.(\d+)\.(\d+)(?:\s.*)?$/;
 
     var buffer:MessageBuffer;
     var nextMessageLength:Int;
@@ -117,8 +117,11 @@ class HaxeServer {
     var requestsTail:DisplayRequest;
     var currentRequest:DisplayRequest;
     var socketListener:js.node.net.Server;
+    var stopProgressCallback:Void->Void;
 
     var crashes:Int = 0;
+
+    public var version(default,null):SemVer;
 
     public function new(context:Context) {
         this.context = context;
@@ -126,7 +129,7 @@ class HaxeServer {
 
     static var reTrailingNewline = ~/\r?\n$/;
 
-    public function start(haxePath:String, callback:Void->Void) {
+    public function start(haxePath:String, ?callback:Void->Void) {
         stop();
 
         inline function error(s) context.sendShowMessage(Error, s);
@@ -138,14 +141,14 @@ class HaxeServer {
             env[key] = context.displayServerConfig.env[key];
         env["HAXE_STD_PATH"] = Path.normalize(Path.join(haxePath, "..", "std"));
 
-        //var haxePath = context.displayServerConfig.haxePath;
+        //var haxePath = context.displayServerConfig.path;
         var checkRun = ChildProcess.spawnSync(haxePath, ["-version"], {env: env});
         if (checkRun.error != null) {
             if (checkRun.error.message.indexOf("ENOENT") >= 0) {
-                if (Path.isAbsolute(haxePath))
-                    return error('Path to Haxe executable is not valid: \'$haxePath\'. Please check your settings.');
-                else if (haxePath == "haxe") // default
+                if (haxePath == "haxe") // default
                     return error("Could not find Haxe in PATH. Is it installed?");
+                else
+                    return error('Path to Haxe executable is not valid: \'$haxePath\'. Please check your settings.');
             }
             return error('Error starting Haxe server: ${checkRun.error}');
         }
@@ -155,15 +158,13 @@ class HaxeServer {
         if (checkRun.status != 0)
             return error("Haxe version check failed: " + output);
 
-        if (!reVersion.match(output))
+        version = SemVer.parse(output);
+        if (version == null)
             return error("Error parsing Haxe version " + haxe.Json.stringify(output));
 
-        var major = Std.parseInt(reVersion.matched(1));
-        var minor = Std.parseInt(reVersion.matched(2));
-        var patch = Std.parseInt(reVersion.matched(3));
-        var isVersionSupported = (major == 3 && minor >= 4) || major >= 4;
+        var isVersionSupported = version >= new SemVer(3, 4, 0);
         if (!isVersionSupported)
-            return error("Unsupported Haxe version! Minimum version required: 3.4.0");
+            return error('Unsupported Haxe version! Minimum version required: 3.4.0. Found: $version.');
 
         buffer = new MessageBuffer();
         nextMessageLength = -1;
@@ -178,10 +179,13 @@ class HaxeServer {
         proc.on(ChildProcessEvent.Exit, onExit);
 
         if (context.config.buildCompletionCache && context.displayArguments != null) {
+            stopProgressCallback = context.startProgress("Initializing Completion");
             trace("Initializing completion cache...");
             process(context.displayArguments.concat(["--no-output"]), null, null, function(_) {
+                stopProgress();
                 trace("Done.");
             }, function(errorMessage) {
+                stopProgress();
                 trace("Failed - try fixing the error(s) and restarting the language server:\n\n" + errorMessage);
             });
         }
@@ -189,7 +193,8 @@ class HaxeServer {
         if (context.config.displayPort != null)
             startSocketServer(context.config.displayPort);
 
-        callback();
+        if (callback != null)
+            callback();
     }
 
     public function startSocketServer(port:Int) {
@@ -235,6 +240,8 @@ class HaxeServer {
             socketListener.close();
         }
 
+        stopProgress();
+
         // cancel all callbacks
         var request = requestsHead;
         while (request != null) {
@@ -245,9 +252,16 @@ class HaxeServer {
         requestsHead = requestsTail = currentRequest = null;
     }
 
-    public function restart(reason:String) {
+    function stopProgress() {
+        if (stopProgressCallback != null) {
+            stopProgressCallback();
+        }
+        stopProgressCallback = null;
+    }
+
+    public function restart(reason:String, ?callback:Void->Void) {
         context.sendLogMessage(Log, 'Restarting Haxe completion server: $reason');
-        start(context.haxePath, function() {});
+        start(context.haxePath, callback);
     }
 
     function onExit(_, _) {

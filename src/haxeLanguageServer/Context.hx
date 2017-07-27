@@ -1,30 +1,16 @@
 package haxeLanguageServer;
 
 import haxe.Timer;
+import haxe.Json;
 import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types;
 import jsonrpc.Protocol;
 import haxeLanguageServer.features.*;
-import haxeLanguageServer.helper.TypeHelper.FunctionFormattingConfig;
 import haxeLanguageServer.features.CodeActionFeature.CodeActionContributor;
+import haxeLanguageServer.helper.SemVer;
+import haxeLanguageServer.helper.TypeHelper.FunctionFormattingConfig;
 import haxeLanguageServer.HaxeServer.DisplayResult;
-
-import js.node.Fs;
-import js.node.Path;
-
-private typedef DisplayServerConfigBase = {
-    var haxePath:String;
-    var arguments:Array<String>;
-    var env:haxe.DynamicAccess<String>;
-}
-
-private typedef DisplayServerConfig = {
-    >DisplayServerConfigBase,
-    @:optional var windows:DisplayServerConfigBase;
-    @:optional var linux:DisplayServerConfigBase;
-    @:optional var osx:DisplayServerConfigBase;
-}
 
 private typedef FunctionGenerationConfig = {
     @:optional var anonymous:FunctionFormattingConfig;
@@ -35,11 +21,9 @@ private typedef CodeGenerationConfig = {
 }
 
 private typedef Config = {
-    var displayConfigurations:Array<Array<String>>;
     var enableDiagnostics:Bool;
     var diagnosticsPathFilter:String;
     var enableCodeLens:Bool;
-    var displayServer:DisplayServerConfig;
     var displayPort:Null<Int>;
     var buildCompletionCache:Bool;
     var codeGeneration:CodeGenerationConfig;
@@ -47,32 +31,30 @@ private typedef Config = {
 }
 
 private typedef InitOptions = {
-    var displayConfigurationIndex:Int;
+    var displayServerConfig:DisplayServerConfig;
+    var displayArguments:Array<String>;
 }
 
 class Context {
-    static var systemKey = switch (Sys.systemName()) {
-        case "Windows": "windows";
-        case "Mac": "osx";
-        default: "linux";
-    };
-
     public var workspacePath(default,null):FsPath;
+    public var displayArguments(default,null):Array<String>;
     public var haxePath(default,null):String;
-    public var displayArguments(get,never):Array<String>;
     public var protocol(default,null):Protocol;
     public var haxeServer(default,null):HaxeServer;
     public var documents(default,null):TextDocuments;
     public var signatureHelp(default,null):SignatureHelpFeature;
+    public var displayOffsetConverter(default,null):DisplayOffsetConverter;
+    public var gotoDefinition(default,null):GotoDefinitionFeature;
     var diagnostics:DiagnosticsManager;
     var codeActions:CodeActionFeature;
+    var activeEditor:DocumentUri;
 
     public var config(default,null):Config;
+    var unmodifiedConfig:Config;
     @:allow(haxeLanguageServer.HaxeServer)
-    var displayServerConfig:DisplayServerConfigBase;
-    var displayConfigurationIndex:Int;
+    var displayServerConfig:DisplayServerConfig;
 
-    inline function get_displayArguments() return config.displayConfigurations[displayConfigurationIndex];
+    var progressId = 0;
 
     public function new(protocol) {
         this.protocol = protocol;
@@ -84,8 +66,18 @@ class Context {
         protocol.onNotification(Methods.DidChangeConfiguration, onDidChangeConfiguration);
         protocol.onNotification(Methods.DidOpenTextDocument, onDidOpenTextDocument);
         protocol.onNotification(Methods.DidSaveTextDocument, onDidSaveTextDocument);
-        protocol.onNotification(VshaxeMethods.DidChangeDisplayConfigurationIndex, onDidChangeDisplayConfigurationIndex);
+        protocol.onNotification(Methods.DidChangeWatchedFiles, onDidChangeWatchedFiles);
+        protocol.onNotification(VshaxeMethods.DidChangeDisplayArguments, onDidChangeDisplayArguments);
+        protocol.onNotification(VshaxeMethods.DidChangeDisplayServerConfig, onDidChangeDisplayServerConfig);
         protocol.onNotification(VshaxeMethods.DidChangeActiveTextEditor, onDidChangeActiveTextEditor);
+    }
+
+    public function startProgress(title:String):Void->Void {
+        var id = progressId++;
+        protocol.sendNotification(VshaxeMethods.ProgressStart, {id: id, title: 'Haxe: $title...'});
+        return function() {
+            protocol.sendNotification(VshaxeMethods.ProgressStop, {id: id});
+        };
     }
 
     public inline function sendShowMessage(type:MessageType, message:String) {
@@ -98,8 +90,10 @@ class Context {
 
     function onInitialize(params:InitializeParams, token:CancellationToken, resolve:InitializeResult->Void, reject:ResponseError<InitializeError>->Void) {
         workspacePath = new FsPath(params.rootPath);
-        haxePath = findHaxe(params.initializationOptions.kha);
-        displayConfigurationIndex = (params.initializationOptions : InitOptions).displayConfigurationIndex;
+        var options = (params.initializationOptions : InitOptions);
+        displayServerConfig = options.displayServerConfig;
+        displayArguments = options.displayArguments;
+        haxePath = options.kha;
         documents = new TextDocuments(protocol);
         return resolve({
             capabilities: {
@@ -121,14 +115,24 @@ class Context {
                 #end
                 codeLensProvider: {
                     resolveProvider: true
-                }
+                },
+                renameProvider: true
             }
         });
     }
 
-    function onDidChangeDisplayConfigurationIndex(params:{index:Int}) {
-        displayConfigurationIndex = params.index;
-        haxeServer.restart("selected configuration was changed");
+    function onDidChangeDisplayArguments(params:{arguments:Array<String>}) {
+        displayArguments = params.arguments;
+        haxeServer.restart("display arguments changed", () -> {
+            if (activeEditor != null) {
+                publishDiagnostics(activeEditor);
+            }
+        });
+    }
+
+    function onDidChangeDisplayServerConfig(config:DisplayServerConfig) {
+        displayServerConfig = config;
+        haxeServer.restart("display server configuration changed");
     }
 
     function onShutdown(_, token:CancellationToken, resolve:NoData->Void, _) {
@@ -138,24 +142,44 @@ class Context {
     }
 
     function onDidChangeConfiguration(newConfig:DidChangeConfigurationParams) {
+        if (newConfig.settings.haxe != null) {
+            // this is a hacky way to completely ignore uninteresting config sections
+            // to do this properly, we need to make language server not watch the whole haxe.* section,
+            // but only what's interesting for us
+            Reflect.deleteField(newConfig.settings.haxe, "displayServer");
+            Reflect.deleteField(newConfig.settings.haxe, "displayConfigurations");
+            Reflect.deleteField(newConfig.settings.haxe, "executable");
+        }
+        var newConfigJson = Json.stringify(newConfig.settings.haxe);
+        var configUnchanged = Json.stringify(unmodifiedConfig) == newConfigJson;
+        if (configUnchanged) {
+            return;
+        }
+
         var firstInit = (config == null);
 
         config = newConfig.settings.haxe;
-        updateDisplayServerConfig();
+        unmodifiedConfig = Json.parse(newConfigJson);
         updateCodeGenerationConfig();
+
+        function onServerStarted() {
+            displayOffsetConverter = DisplayOffsetConverter.create(haxeServer.version);
+            checkLanguageFeatures();
+        }
 
         if (firstInit) {
             haxeServer.start(haxePath, function() {
-                codeActions = new CodeActionFeature(this);
+                onServerStarted();
 
+                codeActions = new CodeActionFeature(this);
                 new CompletionFeature(this);
                 new HoverFeature(this);
                 signatureHelp = new SignatureHelpFeature(this);
-                new GotoDefinitionFeature(this);
+                gotoDefinition = new GotoDefinitionFeature(this);
                 new FindReferencesFeature(this);
                 new DocumentSymbolsFeature(this);
                 new DeterminePackageFeature(this);
-
+                new RenameFeature(this);
                 diagnostics = new DiagnosticsManager(this);
                 new CodeLensFeature(this);
                 new CodeGenerationFeature(this);
@@ -168,32 +192,7 @@ class Context {
                     publishDiagnostics(doc.uri);
             });
         } else {
-            haxeServer.restart("configuration was changed");
-        }
-    }
-
-    function updateDisplayServerConfig() {
-        displayServerConfig = {
-            haxePath: "haxe",
-            arguments: [],
-            env: {},
-        };
-
-        function merge(conf:DisplayServerConfigBase) {
-            if (conf.haxePath != null)
-                displayServerConfig.haxePath = conf.haxePath;
-            if (conf.arguments != null)
-                displayServerConfig.arguments = conf.arguments;
-            if (conf.env != null)
-                displayServerConfig.env = conf.env;
-        }
-
-        var conf = config.displayServer;
-        if (conf != null) {
-            merge(conf);
-            var sysConf:DisplayServerConfigBase = Reflect.field(conf, systemKey);
-            if (sysConf != null)
-                merge(sysConf);
+            haxeServer.restart("configuration was changed", onServerStarted);
         }
     }
 
@@ -204,10 +203,17 @@ class Context {
 
         var functions = codeGen.functions;
         if (functions.anonymous == null)
-            functions.anonymous = {argumentTypeHints: false, returnTypeHint: Never};
+            functions.anonymous = {argumentTypeHints: false, returnTypeHint: Never, useArrowSyntax: true};
+    }
+
+    function checkLanguageFeatures() {
+        var hasArrowFunctions = haxeServer.version >= new SemVer(4, 0, 0);
+        if (!hasArrowFunctions)
+            config.codeGeneration.functions.anonymous.useArrowSyntax = false;
     }
 
     function onDidOpenTextDocument(event:DidOpenTextDocumentParams) {
+        activeEditor = event.textDocument.uri;
         documents.onDidOpenTextDocument(event);
         publishDiagnostics(event.textDocument.uri);
     }
@@ -216,7 +222,16 @@ class Context {
         publishDiagnostics(event.textDocument.uri);
     }
 
+    function onDidChangeWatchedFiles(event:DidChangeWatchedFilesParams) {
+        for (change in event.changes) {
+            if (change.type == Deleted) {
+                diagnostics.clearDiagnostics(change.uri);
+            }
+        }
+    }
+
     function onDidChangeActiveTextEditor(params:{uri:DocumentUri}) {
+        activeEditor = params.uri;
         var document = documents.get(params.uri);
         if (document == null)
             return;

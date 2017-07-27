@@ -66,6 +66,9 @@ class DocHelper {
         if (docInfos.throws.length > 0)
             result += tableHeader("Exception", "Description") + mapDocTags(docInfos.throws);
 
+        if (docInfos.events.length > 0)
+            result += tableHeader("Event", "Description") + mapDocTags(docInfos.events);
+
         if (docInfos.sees.length > 0)
             result += "\nSee also:\n" + docInfos.sees.map(function(p) return "* " + p.doc).join("\n") + "\n";
 
@@ -79,11 +82,15 @@ class DocHelper {
         if (doc == null)
             return null;
 
-        return doc.trim().split("\n").map(function(line) {
+        var result = "";
+        for (line in doc.trim().split("\n")) {
             line = line.trim();
             if (line.startsWith("*")) // JavaDoc-style comments
                 line = line.substr(1);
-            return line;
-        }).join("\n");
+
+            if (line == "") result += "\n\n";
+            else result += line + " ";
+        }
+        return result;
     }
 }

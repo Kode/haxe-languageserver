@@ -5,9 +5,14 @@ import jsonrpc.Types;
 @:publicFields
 class VshaxeMethods {
     /**
-        This notification is sent from the client to the server when display arguments index is changed.
+        This notification is sent from the client to the server when display arguments have changed.
     **/
-    static inline var DidChangeDisplayConfigurationIndex = new NotificationMethod<{index:Int}>("vshaxe/didChangeDisplayConfigurationIndex");
+    static inline var DidChangeDisplayArguments = new NotificationMethod<{arguments:Array<String>}>("vshaxe/didChangeDisplayArguments");
+
+    /**
+        This notification is sent from the client to the server when display arguments have changed.
+    **/
+    static inline var DidChangeDisplayServerConfig = new NotificationMethod<DisplayServerConfig>("vshaxe/didChangeDisplayServerConfig");
 
     /**
         This request is sent from the client to the server to determine the haxe package for a given file,
@@ -29,4 +34,16 @@ class VshaxeMethods {
         This notification is sent from the server to the client to update the parse tree visualization.
     **/
     static inline var UpdateParseTree = new NotificationMethod<{uri:String, parseTree:String}>("vshaxe/updateParseTree");
+
+    /**
+        This notification is sent from the server to the client when some long-running process is started.
+        Client may display this somehow in the UI. The `id` is used later for sending `ProgressStop` notification.
+    **/
+    static inline var ProgressStart = new NotificationMethod<{id:Int, title:String}>("vshaxe/progressStart");
+
+    /**
+        This notification is sent from the server to the client when some long-running process is stopped.
+        If client used `ProgressStart` to display an UI element, it can now hide it using the given `id`.
+    **/
+    static inline var ProgressStop = new NotificationMethod<{id:Int}>("vshaxe/progressStop");
 }

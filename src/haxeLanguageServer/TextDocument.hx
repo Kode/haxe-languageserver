@@ -1,15 +1,9 @@
 package haxeLanguageServer;
 
 import haxe.Timer;
-import hxParser.ParsingPointManager;
-import js.node.Buffer;
+import hxParser.ParseTree;
 
 typedef OnTextDocumentChangeListener = TextDocument->Array<TextDocumentContentChangeEvent>->Int->Void;
-
-typedef DocumentParsingInformation = {
-    tree:hxParser.ParseTree.File,
-    parsingPointManager:ParsingPointManager
-}
 
 class TextDocument {
     public var uri(default,null):DocumentUri;
@@ -19,10 +13,8 @@ class TextDocument {
     public var content(default,null):String;
     public var openTimestamp(default,null):Float;
     public var lineCount(get,never):Int;
-    #if false
-    public var parsingInfo(get,never):DocumentParsingInformation;
-    var _parsingInfo:Null<DocumentParsingInformation>;
-    #end
+    public var parseTree(get,never):File;
+    var _parseTree:Null<File>;
     @:allow(haxeLanguageServer.TextDocuments)
     var lineOffsets:Array<Int>;
     var onUpdateListeners:Array<OnTextDocumentChangeListener> = [];
@@ -56,6 +48,7 @@ class TextDocument {
                 #end
             }
         }
+        _parseTree = null;
         lineOffsets = null;
     }
 
@@ -77,30 +70,18 @@ class TextDocument {
         return {line: line, character: offset - lineOffsets[line]};
     }
 
-    public function offsetToByteOffset(offset:Int):Int {
-        if (offset == 0)
-            return 0;
-        if (offset == content.length)
-            return Buffer.byteLength(content);
-        return Buffer.byteLength(content.substr(0, offset));
-    }
-
-    public inline function byteOffsetAt(position:Position):Int {
-        return offsetToByteOffset(offsetAt(position));
-    }
-
-    public inline function byteRangeToRange(byteRange:Range):Range {
+    public inline function byteRangeToRange(byteRange:Range, offsetConverter:DisplayOffsetConverter):Range {
         return {
-            start: bytePositionToPosition(byteRange.start),
-            end: bytePositionToPosition(byteRange.end),
+            start: bytePositionToPosition(byteRange.start, offsetConverter),
+            end: bytePositionToPosition(byteRange.end, offsetConverter),
         };
     }
 
-    public inline function bytePositionToPosition(bytePosition:Position):Position {
+    inline function bytePositionToPosition(bytePosition:Position, offsetConverter:DisplayOffsetConverter):Position {
         var line = lineAt(bytePosition.line);
         return {
             line: bytePosition.line,
-            character: HaxePosition.byteOffsetToCharacterOffset(line, bytePosition.character)
+            character: offsetConverter.byteOffsetToCharacterOffset(line, bytePosition.character)
         };
     }
 
@@ -132,7 +113,7 @@ class TextDocument {
     }
 
     public function getText(range:Range) {
-        return content.substring(byteOffsetAt(range.start), byteOffsetAt(range.end));
+        return content.substring(offsetAt(range.start), offsetAt(range.end));
     }
 
     public function addUpdateListener(listener:OnTextDocumentChangeListener) {
@@ -169,29 +150,30 @@ class TextDocument {
 
     inline function get_lineCount() return getLineOffsets().length;
 
-    #if false
-
-    function createParsingInfo() {
-        return switch (hxParser.HxParser.parse(content)) {
+    function createParseTree() {
+        return try switch (hxParser.HxParser.parse(content)) {
             case Success(tree):
-                var tree = new hxParser.Converter(tree).convertResultToFile();
-                var manager = new ParsingPointManager();
-                manager.walkFile(tree, Root);
-                { tree:tree, parsingPointManager:manager };
-            case Failure(_): null;
+                new hxParser.Converter(tree).convertResultToFile();
+            case Failure(error):
+                trace('hxparser failed to parse $uri with: \'$error\'');
+                null;
+        } catch (e:Any) {
+            trace('hxParser.Converter failed on $uri with: \'$e\'');
+            null;
         }
     }
 
-    function get_parsingInfo() {
-        if (_parsingInfo == null) {
-            _parsingInfo = createParsingInfo();
+    function get_parseTree() {
+        if (_parseTree == null) {
+            _parseTree = createParseTree();
         }
-        return _parsingInfo;
+        return _parseTree;
     }
 
+    #if false
     function updateParsingInfo(range:Range, rangeLength:Int, textLength:Int) {
         if (_parsingInfo == null) {
-            _parsingInfo = createParsingInfo();
+            _parsingInfo = createParseTree();
         } else {
             // TODO: We might want to catch exceptions in this section, else we risk that the parse tree
             // gets "stuck" if something fails.
