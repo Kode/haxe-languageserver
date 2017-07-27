@@ -6,6 +6,7 @@ import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types;
 import jsonrpc.Protocol;
+import js.node.Path;
 import haxeLanguageServer.features.*;
 import haxeLanguageServer.features.CodeActionFeature.CodeActionContributor;
 import haxeLanguageServer.helper.SemVer;
@@ -33,6 +34,7 @@ private typedef Config = {
 private typedef InitOptions = {
     var displayServerConfig:DisplayServerConfig;
     var displayArguments:Array<String>;
+    var kha:String;
 }
 
 class Context {
@@ -277,7 +279,7 @@ class Context {
         } else {
             executableExtension = "-osx";
         }
-        
+
         return Path.join(kha, "Tools", "haxe", "haxe" + executableExtension);
     }
 }
