@@ -6,12 +6,12 @@ import jsonrpc.CancellationToken;
 import jsonrpc.ResponseError;
 import jsonrpc.Types;
 import jsonrpc.Protocol;
-import js.node.Path;
 import haxeLanguageServer.features.*;
 import haxeLanguageServer.features.CodeActionFeature.CodeActionContributor;
 import haxeLanguageServer.helper.SemVer;
 import haxeLanguageServer.helper.TypeHelper.FunctionFormattingConfig;
 import haxeLanguageServer.HaxeServer.DisplayResult;
+import js.node.Path;
 
 private typedef FunctionGenerationConfig = {
     @:optional var anonymous:FunctionFormattingConfig;
@@ -34,13 +34,12 @@ private typedef Config = {
 private typedef InitOptions = {
     var displayServerConfig:DisplayServerConfig;
     var displayArguments:Array<String>;
-    var kha:String;
 }
 
 class Context {
     public var workspacePath(default,null):FsPath;
-    public var displayArguments(default,null):Array<String>;
     public var haxePath(default,null):String;
+    public var displayArguments(default,null):Array<String>;
     public var protocol(default,null):Protocol;
     public var haxeServer(default,null):HaxeServer;
     public var documents(default,null):TextDocuments;
@@ -92,10 +91,10 @@ class Context {
 
     function onInitialize(params:InitializeParams, token:CancellationToken, resolve:InitializeResult->Void, reject:ResponseError<InitializeError>->Void) {
         workspacePath = new FsPath(params.rootPath);
+        haxePath = findHaxe(params.initializationOptions.kha);
         var options = (params.initializationOptions : InitOptions);
         displayServerConfig = options.displayServerConfig;
         displayArguments = options.displayArguments;
-        haxePath = options.kha;
         documents = new TextDocuments(protocol);
         return resolve({
             capabilities: {
@@ -249,7 +248,7 @@ class Context {
     }
 
     public function callDisplay(args:Array<String>, stdin:String, token:CancellationToken, callback:DisplayResult->Void, errback:String->Void) {
-        var actualArgs = ["--cwd", workspacePath.toString() + "/build"]; // change cwd to workspace root
+        var actualArgs = ["--cwd", Path.join(workspacePath.toString(), "build")]; // change cwd to workspace root
         if (displayArguments != null)
             actualArgs = actualArgs.concat(displayArguments); // add arguments from the workspace settings
         actualArgs = actualArgs.concat([

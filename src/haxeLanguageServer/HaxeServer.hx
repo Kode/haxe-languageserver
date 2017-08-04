@@ -6,7 +6,6 @@ import js.node.child_process.ChildProcess as ChildProcessObject;
 import js.node.child_process.ChildProcess.ChildProcessEvent;
 import js.node.Buffer;
 import js.node.ChildProcess;
-import js.node.Path;
 import js.node.stream.Readable;
 import jsonrpc.CancellationToken;
 import haxeLanguageServer.helper.SemVer;
@@ -139,7 +138,7 @@ class HaxeServer {
             env[key] = js.Node.process.env[key];
         for (key in context.displayServerConfig.env.keys())
             env[key] = context.displayServerConfig.env[key];
-        env["HAXE_STD_PATH"] = Path.normalize(Path.join(haxePath, "..", "std"));
+        env["HAXE_STD_PATH"] = js.node.Path.normalize(js.node.Path.join(haxePath, "..", "std"));
 
         //var haxePath = context.displayServerConfig.path;
         var checkRun = ChildProcess.spawnSync(haxePath, ["-version"], {env: env});
