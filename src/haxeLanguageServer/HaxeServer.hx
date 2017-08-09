@@ -180,7 +180,8 @@ class HaxeServer {
         if (context.config.buildCompletionCache && context.displayArguments != null) {
             stopProgressCallback = context.startProgress("Initializing Completion");
             trace("Initializing completion cache...");
-            process(context.displayArguments.concat(["--no-output"]), null, null, function(_) {
+            var displayArgumentsString: String = cast context.displayArguments; // wrong type gets in here somehow
+            process(["--cwd", js.node.Path.join(context.workspacePath.toString(), "build"), displayArgumentsString, "--no-output"], null, null, function(_) {
                 stopProgress();
                 trace("Done.");
             }, function(errorMessage) {
