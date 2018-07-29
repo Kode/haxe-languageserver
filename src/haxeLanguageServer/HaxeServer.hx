@@ -187,6 +187,7 @@ class HaxeServer {
             }, function(errorMessage) {
                 stopProgress();
                 trace("Failed - try fixing the error(s) and restarting the language server:\n\n" + errorMessage);
+                trace("If Haxe cannot find its standard imports, delete your 'build' folder and try again.");
             });
         }
 
